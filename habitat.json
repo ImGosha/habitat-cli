@@ -1,0 +1,36 @@
+{
+  "batteryBanks": [
+    {
+      "name": "main",
+      "chargeLevel": 60,
+      "capacity": 1000,
+      "efficiency": 95,
+      "health": 100,
+      "connectedPanels": [
+        "roof-east",
+        "roof-west"
+      ]
+    },
+    {
+      "name": "backup",
+      "chargeLevel": 80,
+      "capacity": 1000,
+      "efficiency": 0.92,
+      "health": 0.98,
+      "connectedPanels": []
+    }
+  ],
+  "solarPanels": [
+    {
+      "name": "roof-east",
+      "efficiency": 97,
+      "panelOn": true
+    },
+    {
+      "name": "roof-west",
+      "efficiency": 94,
+      "panelOn": true
+    }
+  ],
+  "rovers": []
+}

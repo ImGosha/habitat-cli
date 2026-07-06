@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { Command, CommanderError } from "commander";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -55,7 +56,27 @@ type RoverOptions = {
 };
 
 const version = "0.1.0";
-const dataFilePath = join(homedir(), ".habitat", "battery-banks.json");
+function findProjectRootPath(): string {
+  let currentPath = process.cwd();
+
+  while (true) {
+    if (existsSync(join(currentPath, "package.json")) && existsSync(join(currentPath, "src"))) {
+      return currentPath;
+    }
+
+    const parentPath = dirname(currentPath);
+
+    if (parentPath === currentPath) {
+      return process.cwd();
+    }
+
+    currentPath = parentPath;
+  }
+}
+
+const projectRootPath = findProjectRootPath();
+const dataFilePath = join(projectRootPath, "habitat.json");
+const legacyDataFilePath = join(homedir(), ".habitat", "battery-banks.json");
 
 function parseNumber(value: string, label: string): number {
   const parsed = Number(value);
@@ -83,28 +104,60 @@ function exampleBlock(lines: string[]): string {
   return `\nExamples:\n${lines.map((line) => `  ${line}`).join("\n")}\n`;
 }
 
+function sectionBlock(title: string, lines: string[]): string {
+  return `\n${title}:\n${lines.map((line) => `  ${line}`).join("\n")}\n`;
+}
+
 async function ensureDataDir(): Promise<void> {
   await mkdir(dirname(dataFilePath), { recursive: true });
 }
 
-async function readData(): Promise<HabitatData> {
-  try {
-    const raw = await readFile(dataFilePath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<HabitatData>;
-    const batteryBanks = Array.isArray(parsed.batteryBanks)
-      ? parsed.batteryBanks.map((batteryBank) => ({
-          ...batteryBank,
-          connectedPanels: Array.isArray(batteryBank.connectedPanels)
-            ? batteryBank.connectedPanels
-            : [],
-        }))
-      : [];
+async function readRawDataFile(path: string): Promise<HabitatData> {
+  const raw = await readFile(path, "utf8");
+  const parsed = JSON.parse(raw) as Partial<HabitatData>;
+  const batteryBanks = Array.isArray(parsed.batteryBanks)
+    ? parsed.batteryBanks.map((batteryBank) => ({
+        ...batteryBank,
+        connectedPanels: Array.isArray(batteryBank.connectedPanels)
+          ? batteryBank.connectedPanels
+          : [],
+      }))
+    : [];
 
-    return {
-      batteryBanks,
-      solarPanels: Array.isArray(parsed.solarPanels) ? parsed.solarPanels : [],
-      rovers: Array.isArray(parsed.rovers) ? parsed.rovers : [],
-    };
+  return {
+    batteryBanks,
+    solarPanels: Array.isArray(parsed.solarPanels) ? parsed.solarPanels : [],
+    rovers: Array.isArray(parsed.rovers) ? parsed.rovers : [],
+  };
+}
+
+async function migrateLegacyDataIfNeeded(): Promise<void> {
+  try {
+    await readFile(dataFilePath, "utf8");
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  try {
+    const legacyData = await readRawDataFile(legacyDataFilePath);
+    await ensureDataDir();
+    await writeFile(dataFilePath, `${JSON.stringify(legacyData, null, 2)}\n`, "utf8");
+    await rm(legacyDataFilePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
+async function readData(): Promise<HabitatData> {
+  await migrateLegacyDataIfNeeded();
+
+  try {
+    return await readRawDataFile(dataFilePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return { batteryBanks: [], solarPanels: [], rovers: [] };
@@ -502,9 +555,26 @@ const program = new Command();
 
 program
   .name("habitat")
-  .description("Manage habitat batteries, solar panels, and rovers.")
+  .description("Manage a habitat power and rover inventory.")
   .version(version)
   .showHelpAfterError("(run with --help for usage)")
+  .addHelpText(
+    "after",
+    sectionBlock("Object model", [
+      "battery banks store power and track charge, capacity, efficiency, health, and connected panels.",
+      "solar panels generate power and track efficiency plus whether the panel is on.",
+      "rovers track health, speed, and location.",
+    ]),
+  )
+  .addHelpText(
+    "after",
+    sectionBlock("Common workflow", [
+      "habitat create battery --name main --charge-level 80 --capacity 1000 --efficiency 0.92 --health 0.98",
+      "habitat create panel --name roof-east --efficiency 0.87 --panel-on true",
+      "habitat battery connect-panel main roof-east",
+      "habitat status battery main",
+    ]),
+  )
   .addHelpText(
     "after",
     exampleBlock([
@@ -512,20 +582,30 @@ program
       "habitat create panel --name roof-east --efficiency 0.87 --panel-on true",
       "habitat battery connect-panel main roof-east",
       "habitat create rover --name scout --health 95 --speed 12 --location bay-a",
+      "habitat schema",
       "habitat battery --help",
       "habitat panel --help",
       "habitat rover --help",
     ]),
+  )
+  .addHelpText(
+    "after",
+    sectionBlock("Discover next", [
+      "Run habitat <command> --help for command options.",
+      "Run habitat battery --help, habitat panel --help, or habitat rover --help for object-specific actions.",
+      "Run habitat schema for JSON command metadata.",
+    ]),
   );
 
 const createCommand = program.command("create").description("Create habitat objects.");
-const listCommand = program.command("list").description("List habitat objects.");
-const statusCommand = program.command("status").description("Show object status.");
-const updateCommand = program.command("update").description("Update habitat objects.");
-const deleteCommand = program.command("delete").description("Delete habitat objects.");
+const listCommand = program.command("list").description("List habitat objects by type.");
+const statusCommand = program.command("status").description("Show one object's detailed status by type and name.");
+const updateCommand = program.command("update").description("Update habitat objects by type and name.");
+const deleteCommand = program.command("delete").description("Delete habitat objects by type and name.");
 const batteryCommand = program.command("battery").description("Manage battery banks and panel connections.");
 const panelCommand = program.command("panel").description("Manage solar panels.");
 const roverCommand = program.command("rover").description("Manage rovers.");
+const schemaCommand = program.command("schema").description("Print machine-readable command and object metadata as JSON.");
 
 createCommand.addHelpText(
   "after",
@@ -945,6 +1025,92 @@ roverCommand
   .argument("<name>", "Rover name")
   .action(deleteRover)
   .addHelpText("after", exampleBlock(["habitat rover delete scout"]));
+
+schemaCommand.action(() => {
+  const schema = {
+    name: "habitat",
+    version,
+    description: "Manage a habitat power and rover inventory.",
+    objectModel: {
+      battery: {
+        description: "Battery banks store power and can be connected to solar panels.",
+        fields: ["name", "chargeLevel", "capacity", "efficiency", "health", "connectedPanels"],
+      },
+      panel: {
+        description: "Solar panels generate power and can be connected to battery banks.",
+        fields: ["name", "efficiency", "panelOn"],
+      },
+      rover: {
+        description: "Rovers track health, speed, and location.",
+        fields: ["name", "health", "speed", "location"],
+      },
+    },
+    commands: [
+      {
+        command: "create battery",
+        description: "Create a battery bank.",
+        requiredOptions: ["--name", "--charge-level", "--capacity", "--efficiency", "--health"],
+        example:
+          "habitat create battery --name main --charge-level 80 --capacity 1000 --efficiency 0.92 --health 0.98",
+      },
+      {
+        command: "create panel",
+        description: "Create a solar panel.",
+        requiredOptions: ["--name", "--efficiency", "--panel-on"],
+        example: "habitat create panel --name roof-east --efficiency 0.87 --panel-on true",
+      },
+      {
+        command: "create rover",
+        description: "Create a rover.",
+        requiredOptions: ["--name", "--health", "--speed", "--location"],
+        example: "habitat create rover --name scout --health 95 --speed 12 --location bay-a",
+      },
+      {
+        command: "list batteries|panels|rovers",
+        description: "List stored objects by type.",
+        example: "habitat list batteries",
+      },
+      {
+        command: "status battery|panel|rover <name>",
+        description: "Show detailed status for one object.",
+        example: "habitat status battery main",
+      },
+      {
+        command: "update battery|panel|rover <name>",
+        description: "Update fields for one object.",
+        example: "habitat update rover scout --location ridge-2",
+      },
+      {
+        command: "delete battery|panel|rover <name>",
+        description: "Delete one object. Deleting a panel also removes its battery connections.",
+        example: "habitat delete panel roof-east",
+      },
+      {
+        command: "battery connect-panel <batteryName> <panelName>",
+        description: "Connect an existing solar panel to an existing battery bank.",
+        example: "habitat battery connect-panel main roof-east",
+      },
+      {
+        command: "schema",
+        description: "Print this command and object metadata as JSON.",
+        example: "habitat schema",
+      },
+    ],
+    commonWorkflow: [
+      "habitat create battery --name main --charge-level 80 --capacity 1000 --efficiency 0.92 --health 0.98",
+      "habitat create panel --name roof-east --efficiency 0.87 --panel-on true",
+      "habitat battery connect-panel main roof-east",
+      "habitat status battery main",
+    ],
+    discoveryHints: [
+      "Run habitat <command> --help for command options.",
+      "Run habitat battery --help, habitat panel --help, or habitat rover --help for object-specific actions.",
+      "Run habitat schema for JSON command metadata.",
+    ],
+  };
+
+  console.log(JSON.stringify(schema, null, 2));
+});
 
 async function main(): Promise<void> {
   try {
