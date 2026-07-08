@@ -7,6 +7,14 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import {
+  fetchBlueprintCatalog,
+  fetchBlueprintDetails,
+  formatBlueprintDetails,
+  formatBlueprintList,
+  type BlueprintRecord,
+} from "./blueprints.js";
+import { fetchResourceCatalog, formatResourceList } from "./resources.js";
+import {
   findModuleById,
   formatModuleListItem,
   getShortModuleId,
@@ -16,16 +24,6 @@ import {
   type ModuleRecord,
 } from "./modules.js";
 import { applyPowerTick, formatModulePowerStatusTable, getModulePowerDrawKw } from "./power.js";
-
-type Blueprint = {
-  id?: string;
-  blueprintId: string;
-  displayName: string;
-  description?: string;
-  output?: Record<string, unknown>;
-  runtimeAttributes?: Record<string, unknown>;
-  capabilities?: string[];
-};
 
 type HabitatRegistrationRecord = {
   baseUrl: string;
@@ -37,7 +35,7 @@ type HabitatRegistrationRecord = {
   catalogVersion?: string;
   lastSeenAt?: string | null;
   starterModules: ModuleRecord[];
-  blueprints: Blueprint[];
+  blueprints: BlueprintRecord[];
 };
 
 type LocalState = {
@@ -65,7 +63,7 @@ type KeplerRegistrationRequest = {
 type KeplerRegistrationResponse = {
   habitatId: string;
   starterModules: ModuleRecord[];
-  blueprints: Blueprint[];
+  blueprints: BlueprintRecord[];
 };
 
 type KeplerHabitatResponse = {
@@ -249,7 +247,7 @@ function printModule(module: ModuleRecord): void {
   console.log(`Runtime Attributes: ${JSON.stringify(module.runtimeAttributes, null, 2)}`);
 }
 
-function findBlueprint(state: LocalState, blueprintId: string): Blueprint | undefined {
+function findBlueprint(state: LocalState, blueprintId: string): BlueprintRecord | undefined {
   return state.kepler?.blueprints.find((blueprint) => blueprint.blueprintId === blueprintId);
 }
 
@@ -357,6 +355,53 @@ async function unregisterHabitat(): Promise<void> {
   await deleteDataFileIfEmpty(state);
 
   console.log(`Unregistered habitat "${deletedDisplayName}" from Kepler.`);
+}
+
+async function listBlueprints(): Promise<void> {
+  try {
+    const blueprints = await fetchBlueprintCatalog({
+      baseUrl: getKeplerBaseUrl(),
+      headers: getKeplerHeaders(),
+    });
+
+    console.log(formatBlueprintList(blueprints));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function showBlueprint(blueprintId: string): Promise<void> {
+  try {
+    const blueprint = await fetchBlueprintDetails({
+      baseUrl: getKeplerBaseUrl(),
+      headers: getKeplerHeaders(),
+      blueprintId,
+    });
+
+    console.log(formatBlueprintDetails(blueprint));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function listResources(): Promise<void> {
+  try {
+    const resources = await fetchResourceCatalog({
+      baseUrl: getKeplerBaseUrl(),
+      headers: getKeplerHeaders(),
+    });
+
+    console.log("Resource catalog: possible resource types in the Kepler world.");
+    console.log("This is not your habitat's local inventory.");
+    console.log("Blueprint requirements will refer to these resource names later.");
+    console.log("");
+    console.log(formatResourceList(resources));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
 }
 
 async function listModules(): Promise<void> {
@@ -609,6 +654,48 @@ tickCommand.addHelpText(
 const moduleCommand = program
   .command("module")
   .description("Manage local habitat modules.");
+
+const blueprintCommand = program
+  .command("blueprint")
+  .description("Read official Kepler blueprint catalog data.");
+
+const resourceCommand = program
+  .command("resource")
+  .description("Read official Kepler resource catalog data.");
+
+blueprintCommand.addHelpText(
+  "after",
+  exampleBlock([
+    "habitat blueprint list",
+    "habitat blueprint show small-solar-array",
+  ]),
+);
+
+blueprintCommand
+  .command("list")
+  .description("List published Kepler blueprints.")
+  .action(listBlueprints)
+  .addHelpText("after", exampleBlock(["habitat blueprint list"]));
+
+blueprintCommand
+  .command("show")
+  .description("Show one published Kepler blueprint.")
+  .argument("<blueprintId>", "Blueprint ID")
+  .action(showBlueprint)
+  .addHelpText("after", exampleBlock(["habitat blueprint show small-solar-array"]));
+
+resourceCommand.addHelpText(
+  "after",
+  exampleBlock([
+    "habitat resource list",
+  ]),
+);
+
+resourceCommand
+  .command("list")
+  .description("List official resource types used by Kepler.")
+  .action(listResources)
+  .addHelpText("after", exampleBlock(["habitat resource list"]));
 
 moduleCommand.addHelpText(
   "after",
