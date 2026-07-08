@@ -1301,7 +1301,7 @@
         "status": "active",
         "crewCapacity": 0,
         "physicalVolumeM3": 8,
-        "currentEnergyKwh": 500,
+        "currentEnergyKwh": 499.7763888888889,
         "energyStorageKwh": 500,
         "reserveKwh": 60,
         "maxPowerOutputKw": 40,
@@ -1359,7 +1359,7 @@
       "displayName": "Workshop Fabricator",
       "runtimeAttributes": {
         "health": 100,
-        "status": "idle",
+        "status": "active",
         "crewCapacity": 1,
         "physicalVolumeM3": 20,
         "rawMaterialBufferKg": 1500,
@@ -1400,5 +1400,13 @@
       ],
       "connectedTo": []
     }
-  ]
+  ],
+  "simulation": {
+    "currentTick": 77,
+    "lastTickAt": "2026-07-08T04:38:39.101Z",
+    "lastPowerDrawKw": 16,
+    "lastEnergyRequestedKwh": 0.022222222222222223,
+    "lastEnergyDrainedKwh": 0.022222222222222223,
+    "lastPowerShortfallKwh": 0
+  }
 }

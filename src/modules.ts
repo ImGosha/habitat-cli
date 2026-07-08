@@ -7,8 +7,16 @@ export type ModuleRecord = {
   capabilities: string[];
 };
 
+export const moduleRuntimeStatuses = ["offline", "idle", "online", "active", "damaged"] as const;
+
+export type ModuleRuntimeStatus = (typeof moduleRuntimeStatuses)[number];
+
 function toIdToken(value: string): string {
   return value.replace(/[^a-zA-Z0-9]+/g, "_");
+}
+
+function normalizeModuleLookupId(value: string): string {
+  return toIdToken(value).toLowerCase();
 }
 
 export function getShortModuleId(module: ModuleRecord): string {
@@ -29,5 +37,18 @@ export function formatModuleListItem(module: ModuleRecord): string {
 }
 
 export function findModuleById(modules: ModuleRecord[] | undefined, moduleId: string): ModuleRecord | undefined {
-  return modules?.find((module) => module.id === moduleId || getShortModuleId(module) === moduleId);
+  const normalizedModuleId = normalizeModuleLookupId(moduleId);
+  return modules?.find(
+    (module) =>
+      normalizeModuleLookupId(module.id) === normalizedModuleId ||
+      normalizeModuleLookupId(getShortModuleId(module)) === normalizedModuleId,
+  );
+}
+
+export function isModuleRuntimeStatus(status: string): status is ModuleRuntimeStatus {
+  return moduleRuntimeStatuses.includes(status as ModuleRuntimeStatus);
+}
+
+export function setModuleRuntimeStatus(module: ModuleRecord, status: ModuleRuntimeStatus): void {
+  module.runtimeAttributes.status = status;
 }

@@ -6,7 +6,16 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import { findModuleById, formatModuleListItem, getShortModuleId, type ModuleRecord } from "./modules.js";
+import {
+  findModuleById,
+  formatModuleListItem,
+  getShortModuleId,
+  isModuleRuntimeStatus,
+  moduleRuntimeStatuses,
+  setModuleRuntimeStatus,
+  type ModuleRecord,
+} from "./modules.js";
+import { applyPowerTick, formatModulePowerStatusTable, getModulePowerDrawKw } from "./power.js";
 
 type Blueprint = {
   id?: string;
@@ -34,6 +43,14 @@ type HabitatRegistrationRecord = {
 type LocalState = {
   kepler?: HabitatRegistrationRecord;
   modules?: ModuleRecord[];
+  simulation?: {
+    currentTick?: number;
+    lastTickAt?: string;
+    lastPowerDrawKw?: number;
+    lastEnergyRequestedKwh?: number;
+    lastEnergyDrainedKwh?: number;
+    lastPowerShortfallKwh?: number;
+  };
 } & Record<string, unknown>;
 
 type RegisterOptions = {
@@ -240,6 +257,21 @@ function createLocalModuleId(blueprintId: string): string {
   return `local_${blueprintId.replace(/[^a-zA-Z0-9]+/g, "_")}_${randomUUID()}`;
 }
 
+function formatEnergy(value: number): string {
+  return Number(value.toFixed(6)).toString();
+}
+
+function parseTickCount(count: string): number {
+  const tickCount = Number(count);
+
+  if (!Number.isInteger(tickCount) || tickCount <= 0) {
+    console.error("Tick count must be a positive whole number.");
+    process.exit(1);
+  }
+
+  return tickCount;
+}
+
 async function registerHabitat(options: RegisterOptions): Promise<void> {
   const state = await readState();
 
@@ -341,6 +373,11 @@ async function listModules(): Promise<void> {
   }
 }
 
+async function showModulePowerStatus(): Promise<void> {
+  const state = await readAndPersistState();
+  console.log(formatModulePowerStatusTable(state.modules ?? []));
+}
+
 async function showModule(moduleId: string): Promise<void> {
   const state = await readAndPersistState();
   const module = findModuleById(state.modules, moduleId);
@@ -351,6 +388,28 @@ async function showModule(moduleId: string): Promise<void> {
   }
 
   printModule(module);
+}
+
+async function setModuleStatus(moduleId: string, status: string): Promise<void> {
+  if (!isModuleRuntimeStatus(status)) {
+    console.error(`Status must be one of: ${moduleRuntimeStatuses.join(", ")}.`);
+    process.exit(1);
+  }
+
+  const state = await readAndPersistState();
+  const module = findModuleById(state.modules, moduleId);
+
+  if (!module) {
+    console.error(`Module "${moduleId}" was not found.`);
+    process.exit(1);
+  }
+
+  setModuleRuntimeStatus(module, status);
+  await writeState(state);
+
+  console.log(
+    `Updated ${getShortModuleId(module)} to ${status}. Current power draw: ${formatEnergy(getModulePowerDrawKw(module))} kW.`,
+  );
 }
 
 async function createModule(options: ModuleCreateOptions): Promise<void> {
@@ -435,6 +494,39 @@ async function deleteModule(moduleId: string): Promise<void> {
   console.log(`Deleted module "${getShortModuleId(module)}".`);
 }
 
+async function runTicks(count: string): Promise<void> {
+  const tickCount = parseTickCount(count);
+  const state = await readAndPersistState();
+
+  try {
+    const result = applyPowerTick(state, tickCount);
+    await writeState(state);
+
+    const battery = findModuleById(state.modules, result.batteryId);
+    const batteryLabel = battery ? getShortModuleId(battery) : result.batteryId;
+
+    console.log(`Advanced ${result.tickCount} tick(s).`);
+    console.log(`Current Tick: ${result.currentTick}`);
+    console.log(`Power Draw: ${formatEnergy(result.totalPowerDrawKw)} kW`);
+    console.log(`Energy Requested: ${formatEnergy(result.energyRequestedKwh)} kWh`);
+    console.log(`Energy Drained: ${formatEnergy(result.energyDrainedKwh)} kWh`);
+
+    if (result.powerShortfallKwh > 0) {
+      console.log(`Power Shortfall: ${formatEnergy(result.powerShortfallKwh)} kWh`);
+    }
+
+    console.log(`Battery: ${batteryLabel}`);
+    console.log(`Battery Remaining: ${formatEnergy(result.batteryEnergyRemainingKwh)} kWh`);
+
+    if (result.powerShortfallKwh > 0) {
+      console.log("Warning: battery did not have enough energy for the full power demand.");
+    }
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
 const program = new Command();
 
 program
@@ -457,6 +549,7 @@ program
       "habitat register --name \"Artemis Ridge\"",
       "habitat status",
       "habitat module list",
+      "habitat tick 60",
       "habitat unregister",
     ]),
   );
@@ -498,6 +591,21 @@ unregisterCommand.addHelpText(
   ]),
 );
 
+const tickCommand = program
+  .command("tick")
+  .description("Advance the local habitat power simulation by one-second ticks.")
+  .argument("<count>", "Number of one-second ticks to run")
+  .action(runTicks);
+
+tickCommand.addHelpText(
+  "after",
+  exampleBlock([
+    "habitat tick 1",
+    "habitat tick 60",
+    "habitat tick 3600",
+  ]),
+);
+
 const moduleCommand = program
   .command("module")
   .description("Manage local habitat modules.");
@@ -506,6 +614,8 @@ moduleCommand.addHelpText(
   "after",
   exampleBlock([
     "habitat module list",
+    "habitat module status",
+    "habitat module set-status basic_battery_1 active",
     "habitat module show <moduleId>",
     "habitat module create --blueprint-id small-solar-array --name \"Solar Array Alpha\"",
     "habitat module update <moduleId> --status active --health 95",
@@ -518,6 +628,26 @@ moduleCommand
   .description("List local habitat modules.")
   .action(listModules)
   .addHelpText("after", exampleBlock(["habitat module list"]));
+
+moduleCommand
+  .command("status")
+  .description("Show current module states and power draw.")
+  .action(showModulePowerStatus)
+  .addHelpText("after", exampleBlock(["habitat module status"]));
+
+moduleCommand
+  .command("set-status")
+  .description("Change one local module runtime state.")
+  .argument("<moduleId>", "Module ID or short ID")
+  .argument("<status>", `Runtime status: ${moduleRuntimeStatuses.join(", ")}`)
+  .action(setModuleStatus)
+  .addHelpText(
+    "after",
+    exampleBlock([
+      "habitat module set-status basic_battery_1 active",
+      "habitat module set-status workshop_fabricator_1 damaged",
+    ]),
+  );
 
 moduleCommand
   .command("show")
