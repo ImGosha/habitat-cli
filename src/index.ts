@@ -13,6 +13,15 @@ import {
   formatBlueprintList,
   type BlueprintRecord,
 } from "./blueprints.js";
+import {
+  advanceConstructionJobs,
+  cancelConstruction,
+  formatConstructionStatus,
+  getEffectiveInventory,
+  previewConstruction,
+  startConstruction,
+} from "./construction.js";
+import { addInventoryResource, formatInventoryList } from "./inventory.js";
 import { fetchResourceCatalog, formatResourceList } from "./resources.js";
 import {
   findModuleById,
@@ -40,6 +49,7 @@ type HabitatRegistrationRecord = {
 
 type LocalState = {
   kepler?: HabitatRegistrationRecord;
+  inventory?: Record<string, number>;
   modules?: ModuleRecord[];
   simulation?: {
     currentTick?: number;
@@ -86,6 +96,10 @@ type ModuleUpdateOptions = {
   name?: string;
   status?: string;
   health?: string;
+};
+
+type ConstructOptions = {
+  dryRun?: boolean;
 };
 
 const version = "0.1.0";
@@ -259,6 +273,32 @@ function formatEnergy(value: number): string {
   return Number(value.toFixed(6)).toString();
 }
 
+function getBlueprintInputInventory(blueprint: BlueprintRecord): Record<string, number> {
+  const inventory: Record<string, number> = {};
+
+  if (!blueprint.inputs || typeof blueprint.inputs !== "object" || Array.isArray(blueprint.inputs)) {
+    return inventory;
+  }
+
+  for (const [resourceType, quantity] of Object.entries(blueprint.inputs)) {
+    if (typeof quantity === "number" && Number.isFinite(quantity) && quantity > 0) {
+      inventory[resourceType] = quantity;
+    }
+  }
+
+  return inventory;
+}
+
+function formatInventoryLines(inventory: Record<string, number>): string[] {
+  const resourceTypes = Object.keys(inventory).sort();
+
+  if (resourceTypes.length === 0) {
+    return ["  none"];
+  }
+
+  return resourceTypes.map((resourceType) => `  ${resourceType}: ${formatEnergy(inventory[resourceType] ?? 0)}`);
+}
+
 function parseTickCount(count: string): number {
   const tickCount = Number(count);
 
@@ -299,6 +339,7 @@ async function registerHabitat(options: RegisterOptions): Promise<void> {
     starterModules: registration.starterModules,
     blueprints: registration.blueprints,
   };
+  state.inventory = getEffectiveInventory(state);
   state.modules = registration.starterModules.map(cloneModule);
 
   await writeState(state);
@@ -402,6 +443,102 @@ async function listResources(): Promise<void> {
     console.error((error as Error).message);
     process.exit(1);
   }
+}
+
+async function constructBlueprint(blueprintId: string, options: ConstructOptions): Promise<void> {
+  const state = await readState();
+
+  try {
+    const blueprint = await fetchBlueprintDetails({
+      baseUrl: getKeplerBaseUrl(),
+      headers: getKeplerHeaders(),
+      blueprintId,
+    });
+    const preview = previewConstruction(state, blueprint);
+    const requiredInventory = getBlueprintInputInventory(blueprint);
+
+    if (options.dryRun) {
+      console.log(`Construction dry run for "${blueprint.blueprintId}".`);
+      console.log(`Facility: ${preview.facilityDisplayName} (${preview.facilityId})`);
+      console.log(`Build Ticks: ${preview.totalTicks}`);
+      console.log("Materials Required:");
+
+      for (const line of formatInventoryLines(requiredInventory)) {
+        console.log(line);
+      }
+
+      console.log("Inventory After:");
+
+      for (const line of formatInventoryLines(preview.inventoryAfter)) {
+        console.log(line);
+      }
+
+      console.log("No local files were changed.");
+      return;
+    }
+
+    const startedJob = startConstruction(state, blueprint);
+    await writeState(state);
+
+    console.log(`Started construction for "${blueprint.blueprintId}".`);
+    console.log(`Facility: ${preview.facilityDisplayName} (${startedJob.facilityId})`);
+    console.log(`Remaining Ticks: ${startedJob.remainingTicks}`);
+    console.log("Inventory After:");
+
+    for (const line of formatInventoryLines(state.inventory ?? {})) {
+      console.log(line);
+    }
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function showConstructionStatus(): Promise<void> {
+  const state = await readState();
+  console.log(formatConstructionStatus(state.modules ?? []));
+}
+
+async function cancelConstructionCommand(facilityModuleId: string): Promise<void> {
+  const state = await readState();
+  const facility = findModuleById(state.modules, facilityModuleId);
+
+  if (!facility) {
+    console.error(`Module "${facilityModuleId}" was not found.`);
+    process.exit(1);
+  }
+
+  try {
+    const result = cancelConstruction(state, facility);
+    await writeState(state);
+    console.log(`Canceled construction on ${result.facilityId}.`);
+    console.log("Materials were not refunded.");
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function listInventory(): Promise<void> {
+  const state = await readState();
+  console.log(formatInventoryList(state.inventory ?? {}));
+}
+
+async function addInventory(resourceId: string, amount: string): Promise<void> {
+  const numericAmount = Number(amount);
+
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    console.error("amount must be a positive number.");
+    process.exit(1);
+  }
+
+  const state = await readState();
+  const result = addInventoryResource(state, resourceId, numericAmount);
+  await writeState(state);
+
+  console.log(`Added ${formatEnergy(numericAmount)} ${resourceId} to local inventory.`);
+  console.log(`Previous Amount: ${formatEnergy(result.previousAmount)}`);
+  console.log(`New Amount: ${formatEnergy(result.newAmount)}`);
 }
 
 async function listModules(): Promise<void> {
@@ -545,6 +682,7 @@ async function runTicks(count: string): Promise<void> {
 
   try {
     const result = applyPowerTick(state, tickCount);
+    const constructionResult = advanceConstructionJobs(state, tickCount);
     await writeState(state);
 
     const battery = findModuleById(state.modules, result.batteryId);
@@ -565,6 +703,15 @@ async function runTicks(count: string): Promise<void> {
 
     if (result.powerShortfallKwh > 0) {
       console.log("Warning: battery did not have enough energy for the full power demand.");
+    }
+
+    if (constructionResult.completedModules.length > 0) {
+      console.log("");
+      console.log("Construction Completed:");
+
+      for (const module of constructionResult.completedModules) {
+        console.log(`- ${module.displayName} (${module.id})`);
+      }
     }
   } catch (error) {
     console.error((error as Error).message);
@@ -636,6 +783,21 @@ unregisterCommand.addHelpText(
   ]),
 );
 
+const constructCommand = program
+  .command("construct")
+  .description("Start a local construction job from an official Kepler blueprint.")
+  .argument("<blueprintId>", "Blueprint ID")
+  .option("--dry-run", "Preview the build without changing local state")
+  .action(constructBlueprint);
+
+constructCommand.addHelpText(
+  "after",
+  exampleBlock([
+    "habitat construct small-solar-array --dry-run",
+    "habitat construct small-solar-array",
+  ]),
+);
+
 const tickCommand = program
   .command("tick")
   .description("Advance the local habitat power simulation by one-second ticks.")
@@ -662,6 +824,14 @@ const blueprintCommand = program
 const resourceCommand = program
   .command("resource")
   .description("Read official Kepler resource catalog data.");
+
+const constructionCommand = program
+  .command("construction")
+  .description("Inspect or cancel local construction jobs.");
+
+const inventoryCommand = program
+  .command("inventory")
+  .description("Manage local habitat inventory.");
 
 blueprintCommand.addHelpText(
   "after",
@@ -696,6 +866,49 @@ resourceCommand
   .description("List official resource types used by Kepler.")
   .action(listResources)
   .addHelpText("after", exampleBlock(["habitat resource list"]));
+
+inventoryCommand.addHelpText(
+  "after",
+  exampleBlock([
+    "habitat inventory list",
+    "habitat inventory add silicate-glass 45",
+  ]),
+);
+
+inventoryCommand
+  .command("list")
+  .description("List all local inventory resources and amounts.")
+  .action(listInventory)
+  .addHelpText("after", exampleBlock(["habitat inventory list"]));
+
+inventoryCommand
+  .command("add")
+  .description("Add a resource amount to local inventory.")
+  .argument("<resourceId>", "Resource ID")
+  .argument("<amount>", "Amount to add")
+  .action(addInventory)
+  .addHelpText("after", exampleBlock(["habitat inventory add silicate-glass 45"]));
+
+constructionCommand.addHelpText(
+  "after",
+  exampleBlock([
+    "habitat construction status",
+    "habitat construction cancel workshop-fabricator-1",
+  ]),
+);
+
+constructionCommand
+  .command("status")
+  .description("Show active local construction jobs.")
+  .action(showConstructionStatus)
+  .addHelpText("after", exampleBlock(["habitat construction status"]));
+
+constructionCommand
+  .command("cancel")
+  .description("Cancel one local construction job without refunding materials.")
+  .argument("<facilityModuleId>", "Facility module ID or short ID")
+  .action(cancelConstructionCommand)
+  .addHelpText("after", exampleBlock(["habitat construction cancel workshop-fabricator-1"]));
 
 moduleCommand.addHelpText(
   "after",

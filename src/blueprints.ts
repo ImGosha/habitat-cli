@@ -8,6 +8,8 @@ export type BlueprintRecord = {
   status?: string;
   output?: BlueprintOutput;
   inputs?: Record<string, unknown>;
+  productionCost?: Record<string, unknown>;
+  requiredFacility?: Record<string, unknown>;
   buildTicks?: number;
   prerequisites?: string[];
   repeatable?: boolean;
