@@ -6,21 +6,14 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-
-type StarterModule = {
-  id: string;
-  blueprintId: string;
-  displayName: string;
-  connectedTo: string[];
-  runtimeAttributes: Record<string, unknown>;
-  capabilities: string[];
-};
+import { findModuleById, formatModuleListItem, getShortModuleId, type ModuleRecord } from "./modules.js";
 
 type Blueprint = {
   id?: string;
   blueprintId: string;
   displayName: string;
   description?: string;
+  output?: Record<string, unknown>;
   runtimeAttributes?: Record<string, unknown>;
   capabilities?: string[];
 };
@@ -34,12 +27,13 @@ type HabitatRegistrationRecord = {
   status?: string;
   catalogVersion?: string;
   lastSeenAt?: string | null;
-  starterModules: StarterModule[];
+  starterModules: ModuleRecord[];
   blueprints: Blueprint[];
 };
 
 type LocalState = {
   kepler?: HabitatRegistrationRecord;
+  modules?: ModuleRecord[];
 } & Record<string, unknown>;
 
 type RegisterOptions = {
@@ -53,7 +47,7 @@ type KeplerRegistrationRequest = {
 
 type KeplerRegistrationResponse = {
   habitatId: string;
-  starterModules: StarterModule[];
+  starterModules: ModuleRecord[];
   blueprints: Blueprint[];
 };
 
@@ -66,6 +60,17 @@ type KeplerHabitatResponse = {
     status: string;
     lastSeenAt?: string | null;
   };
+};
+
+type ModuleCreateOptions = {
+  blueprintId: string;
+  name: string;
+};
+
+type ModuleUpdateOptions = {
+  name?: string;
+  status?: string;
+  health?: string;
 };
 
 const version = "0.1.0";
@@ -123,6 +128,26 @@ function getKeplerHeaders(): HeadersInit {
   };
 }
 
+function cloneModule(module: ModuleRecord): ModuleRecord {
+  return {
+    ...module,
+    connectedTo: [...module.connectedTo],
+    runtimeAttributes: { ...module.runtimeAttributes },
+    capabilities: [...module.capabilities],
+  };
+}
+
+function normalizeState(state: LocalState): LocalState {
+  if (!Array.isArray(state.modules) && state.kepler?.starterModules) {
+    return {
+      ...state,
+      modules: state.kepler.starterModules.map(cloneModule),
+    };
+  }
+
+  return state;
+}
+
 async function keplerRequest(path: string, init: RequestInit): Promise<Response> {
   const response = await fetch(`${getKeplerBaseUrl()}${path}`, init);
 
@@ -144,7 +169,7 @@ async function readState(): Promise<LocalState> {
   try {
     const raw = await readFile(dataFilePath, "utf8");
     const parsed = JSON.parse(raw) as LocalState;
-    return typeof parsed === "object" && parsed !== null ? parsed : {};
+    return typeof parsed === "object" && parsed !== null ? normalizeState(parsed) : {};
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return {};
@@ -152,6 +177,12 @@ async function readState(): Promise<LocalState> {
 
     throw error;
   }
+}
+
+async function readAndPersistState(): Promise<LocalState> {
+  const state = await readState();
+  await writeState(state);
+  return state;
 }
 
 async function writeState(state: LocalState): Promise<void> {
@@ -189,6 +220,26 @@ function printRegistrationStatus(registration: HabitatRegistrationRecord): void 
   console.log(`Blueprints: ${registration.blueprints.length}`);
 }
 
+function printModule(module: ModuleRecord): void {
+  console.log(`ID: ${module.id}`);
+  console.log(`Short ID: ${getShortModuleId(module)}`);
+  console.log(`Display Name: ${module.displayName}`);
+  console.log(`Blueprint ID: ${module.blueprintId}`);
+  console.log(`Status: ${module.runtimeAttributes.status ?? "Unknown"}`);
+  console.log(`Health: ${module.runtimeAttributes.health ?? "Unknown"}`);
+  console.log(`Connected To: ${module.connectedTo.length > 0 ? module.connectedTo.join(", ") : "None"}`);
+  console.log(`Capabilities: ${module.capabilities.length > 0 ? module.capabilities.join(", ") : "None"}`);
+  console.log(`Runtime Attributes: ${JSON.stringify(module.runtimeAttributes, null, 2)}`);
+}
+
+function findBlueprint(state: LocalState, blueprintId: string): Blueprint | undefined {
+  return state.kepler?.blueprints.find((blueprint) => blueprint.blueprintId === blueprintId);
+}
+
+function createLocalModuleId(blueprintId: string): string {
+  return `local_${blueprintId.replace(/[^a-zA-Z0-9]+/g, "_")}_${randomUUID()}`;
+}
+
 async function registerHabitat(options: RegisterOptions): Promise<void> {
   const state = await readState();
 
@@ -218,6 +269,7 @@ async function registerHabitat(options: RegisterOptions): Promise<void> {
     starterModules: registration.starterModules,
     blueprints: registration.blueprints,
   };
+  state.modules = registration.starterModules.map(cloneModule);
 
   await writeState(state);
   console.log(`Registered habitat "${requestBody.displayName}" with Kepler.`);
@@ -225,7 +277,7 @@ async function registerHabitat(options: RegisterOptions): Promise<void> {
 }
 
 async function showHabitatRegistrationStatus(): Promise<void> {
-  const state = await readState();
+  const state = await readAndPersistState();
 
   if (!state.kepler) {
     console.error("This CLI has not been registered with Kepler yet.");
@@ -252,6 +304,7 @@ async function showHabitatRegistrationStatus(): Promise<void> {
 
   await writeState(state);
   printRegistrationStatus(state.kepler);
+  console.log(`Modules: ${state.modules?.length ?? 0}`);
 }
 
 async function unregisterHabitat(): Promise<void> {
@@ -274,6 +327,114 @@ async function unregisterHabitat(): Promise<void> {
   console.log(`Unregistered habitat "${deletedDisplayName}" from Kepler.`);
 }
 
+async function listModules(): Promise<void> {
+  const state = await readAndPersistState();
+  const modules = state.modules ?? [];
+
+  if (modules.length === 0) {
+    console.log("No modules found.");
+    return;
+  }
+
+  for (const module of modules) {
+    console.log(formatModuleListItem(module));
+  }
+}
+
+async function showModule(moduleId: string): Promise<void> {
+  const state = await readAndPersistState();
+  const module = findModuleById(state.modules, moduleId);
+
+  if (!module) {
+    console.error(`Module "${moduleId}" was not found.`);
+    process.exit(1);
+  }
+
+  printModule(module);
+}
+
+async function createModule(options: ModuleCreateOptions): Promise<void> {
+  const state = await readAndPersistState();
+  const blueprint = findBlueprint(state, options.blueprintId);
+
+  if (!blueprint) {
+    console.error(`Blueprint "${options.blueprintId}" was not found in local Kepler registration data.`);
+    process.exit(1);
+  }
+
+  if (blueprint.output?.itemType !== "module") {
+    console.error(`Blueprint "${options.blueprintId}" does not create a module.`);
+    process.exit(1);
+  }
+
+  const module: ModuleRecord = {
+    id: createLocalModuleId(options.blueprintId),
+    blueprintId: blueprint.blueprintId,
+    displayName: options.name,
+    connectedTo: [],
+    runtimeAttributes: { ...(blueprint.runtimeAttributes ?? {}) },
+    capabilities: [...(blueprint.capabilities ?? [])],
+  };
+
+  state.modules = [...(state.modules ?? []), module];
+  await writeState(state);
+
+  console.log(`Created module "${module.displayName}".`);
+  console.log(`Module ID: ${getShortModuleId(module)}`);
+  console.log(`Full ID: ${module.id}`);
+}
+
+async function updateModule(moduleId: string, options: ModuleUpdateOptions): Promise<void> {
+  const state = await readAndPersistState();
+  const module = findModuleById(state.modules, moduleId);
+
+  if (!module) {
+    console.error(`Module "${moduleId}" was not found.`);
+    process.exit(1);
+  }
+
+  if (options.name !== undefined) {
+    module.displayName = options.name;
+  }
+
+  if (options.status !== undefined) {
+    module.runtimeAttributes.status = options.status;
+  }
+
+  if (options.health !== undefined) {
+    const health = Number(options.health);
+
+    if (Number.isNaN(health)) {
+      console.error("health must be a number.");
+      process.exit(1);
+    }
+
+    module.runtimeAttributes.health = health;
+  }
+
+  await writeState(state);
+  console.log(`Updated module "${getShortModuleId(module)}".`);
+}
+
+async function deleteModule(moduleId: string): Promise<void> {
+  const state = await readAndPersistState();
+  const module = findModuleById(state.modules, moduleId);
+
+  if (!module) {
+    console.error(`Module "${moduleId}" was not found.`);
+    process.exit(1);
+  }
+
+  state.modules = (state.modules ?? []).filter((entry) => entry.id !== module.id);
+
+  for (const entry of state.modules) {
+    entry.connectedTo = entry.connectedTo.filter((connectionId) => connectionId !== module.id);
+  }
+
+  await deleteDataFileIfEmpty(state);
+  console.log(`Deleted module "${getShortModuleId(module)}".`);
+}
+
 const program = new Command();
 
 program
@@ -286,6 +447,7 @@ program
     sectionBlock("Kepler contract", [
       "register sends displayName and habitatUuid to the Kepler planet server.",
       "status fetches the latest remote registration record for this habitat.",
+      "starterModules from registration hydrate local module records.",
       "unregister deletes the remote Kepler habitat registration.",
     ]),
   )
@@ -294,6 +456,7 @@ program
     exampleBlock([
       "habitat register --name \"Artemis Ridge\"",
       "habitat status",
+      "habitat module list",
       "habitat unregister",
     ]),
   );
@@ -334,6 +497,69 @@ unregisterCommand.addHelpText(
     "habitat unregister",
   ]),
 );
+
+const moduleCommand = program
+  .command("module")
+  .description("Manage local habitat modules.");
+
+moduleCommand.addHelpText(
+  "after",
+  exampleBlock([
+    "habitat module list",
+    "habitat module show <moduleId>",
+    "habitat module create --blueprint-id small-solar-array --name \"Solar Array Alpha\"",
+    "habitat module update <moduleId> --status active --health 95",
+    "habitat module delete <moduleId>",
+  ]),
+);
+
+moduleCommand
+  .command("list")
+  .description("List local habitat modules.")
+  .action(listModules)
+  .addHelpText("after", exampleBlock(["habitat module list"]));
+
+moduleCommand
+  .command("show")
+  .description("Show one local habitat module.")
+  .argument("<moduleId>", "Module ID")
+  .action(showModule)
+  .addHelpText("after", exampleBlock(["habitat module show <moduleId>"]));
+
+moduleCommand
+  .command("create")
+  .description("Create a local module from a stored Kepler blueprint.")
+  .requiredOption("--blueprint-id <blueprintId>", "Blueprint ID")
+  .requiredOption("--name <name>", "Module display name")
+  .action(createModule)
+  .addHelpText(
+    "after",
+    exampleBlock([
+      "habitat module create --blueprint-id small-solar-array --name \"Solar Array Alpha\"",
+    ]),
+  );
+
+moduleCommand
+  .command("update")
+  .description("Update common local module fields.")
+  .argument("<moduleId>", "Module ID")
+  .option("--name <name>", "Module display name")
+  .option("--status <status>", "Runtime status")
+  .option("--health <number>", "Runtime health")
+  .action(updateModule)
+  .addHelpText(
+    "after",
+    exampleBlock([
+      "habitat module update <moduleId> --status active --health 95",
+    ]),
+  );
+
+moduleCommand
+  .command("delete")
+  .description("Delete a local habitat module.")
+  .argument("<moduleId>", "Module ID")
+  .action(deleteModule)
+  .addHelpText("after", exampleBlock(["habitat module delete <moduleId>"]));
 
 async function main(): Promise<void> {
   try {

@@ -8,7 +8,8 @@
     "noEmit": true,
     "skipLibCheck": true,
     "types": [
-      "node"
+      "node",
+      "bun"
     ]
   },
   "include": [

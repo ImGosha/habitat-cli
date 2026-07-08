@@ -32,5 +32,1373 @@
       "panelOn": true
     }
   ],
-  "rovers": []
+  "rovers": [],
+  "kepler": {
+    "baseUrl": "https://planet.turingguild.com",
+    "displayName": "George's Shack",
+    "habitatUuid": "bd09e90f-d7c3-4902-b02e-3db495cf9dfb",
+    "habitatId": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb",
+    "starterModules": [
+      {
+        "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_command_module_1",
+        "blueprintId": "command-module",
+        "displayName": "Command Module",
+        "runtimeAttributes": {
+          "health": 100,
+          "status": "active",
+          "crewCapacity": 2,
+          "pressurizedVolumeM3": 60,
+          "dataStorageTb": 4,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 2,
+            "active": 2,
+            "damaged": 2
+          }
+        },
+        "capabilities": [
+          "habitat-command"
+        ],
+        "connectedTo": []
+      },
+      {
+        "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_life_support_1",
+        "blueprintId": "life-support",
+        "displayName": "Life Support",
+        "runtimeAttributes": {
+          "health": 100,
+          "status": "active",
+          "crewCapacity": 2,
+          "crewSupportNominal": 2,
+          "crewSupportEmergency": 3,
+          "pressurizedVolumeM3": 35,
+          "oxygenBufferKg": 120,
+          "waterBufferKg": 1200,
+          "co2WarningPpm": 2000,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 5,
+            "active": 5,
+            "damaged": 5
+          },
+          "oxygenProductionKgPerHour": 0.1,
+          "co2ScrubKgPerHour": 0.12
+        },
+        "capabilities": [
+          "atmosphere-control",
+          "redundant-life-support"
+        ],
+        "connectedTo": []
+      },
+      {
+        "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_basic_battery_1",
+        "blueprintId": "basic-battery",
+        "displayName": "Basic Battery",
+        "runtimeAttributes": {
+          "health": 100,
+          "status": "offline",
+          "crewCapacity": 0,
+          "physicalVolumeM3": 8,
+          "currentEnergyKwh": 500,
+          "energyStorageKwh": 500,
+          "reserveKwh": 60,
+          "maxPowerOutputKw": 40,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 0,
+            "active": 0,
+            "damaged": 0
+          }
+        },
+        "capabilities": [
+          "power-storage"
+        ],
+        "connectedTo": []
+      },
+      {
+        "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_supply_cache_1",
+        "blueprintId": "supply-cache",
+        "displayName": "Supply Cache",
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 0.5,
+            "active": 0.5,
+            "damaged": 0
+          },
+          "status": "active",
+          "crewCapacity": 0,
+          "currentEnergyKwh": 0,
+          "energyStorageKwh": 0,
+          "maxPowerOutputKw": 0,
+          "powerGenerationKw": 0,
+          "storageVolumeM3": 0,
+          "crewAccessCapacity": 0,
+          "oxygenProductionKgPerHour": 0,
+          "co2ScrubKgPerHour": 0,
+          "suitOxygenCapacityKg": 0,
+          "suitOxygenRemainingKg": 0,
+          "suitOxygenUseKgPerHour": 0,
+          "waterUseLitersPerPersonPerHour": 0,
+          "sunlightIrradianceKwPerM2": 0,
+          "storedResources": {},
+          "dataCapacityGb": 0,
+          "maintenanceLoadTicks": 0
+        },
+        "capabilities": [
+          "storage"
+        ],
+        "connectedTo": []
+      },
+      {
+        "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_workshop_fabricator_1",
+        "blueprintId": "workshop-fabricator",
+        "displayName": "Workshop Fabricator",
+        "runtimeAttributes": {
+          "health": 100,
+          "status": "idle",
+          "crewCapacity": 1,
+          "physicalVolumeM3": 20,
+          "rawMaterialBufferKg": 1500,
+          "inProcessStorageM3": 3,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 1,
+            "active": 8,
+            "damaged": 1
+          }
+        },
+        "capabilities": [
+          "basic-fabrication"
+        ],
+        "connectedTo": []
+      },
+      {
+        "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_basic_suitport_1",
+        "blueprintId": "basic-suitport",
+        "displayName": "Basic Suitport",
+        "runtimeAttributes": {
+          "health": 100,
+          "status": "idle",
+          "crewCapacity": 1,
+          "physicalVolumeM3": 4,
+          "cargoTransferRating": "poor",
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 0.5,
+            "active": 2,
+            "damaged": 0.5
+          },
+          "crewAccessCapacity": 1
+        },
+        "capabilities": [
+          "limited-eva",
+          "suitport-access"
+        ],
+        "connectedTo": []
+      }
+    ],
+    "blueprints": [
+      {
+        "id": "blueprint_kepler-442b-v1_basic-battery",
+        "blueprintId": "basic-battery",
+        "displayName": "Basic Battery Blueprint",
+        "description": "Supplies stored electrical power to the habitat when generation drops, helping keep essential systems running through night cycles, short interruptions, and dust-storm conditions.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "basic-battery",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 80,
+          "ferrite": 55,
+          "conductive-ore": 24,
+          "rare-catalyst": 2
+        },
+        "productionCost": {
+          "power": 3
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 180,
+        "prerequisites": [],
+        "unlocks": [],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "status": "offline",
+          "crewCapacity": 0,
+          "physicalVolumeM3": 8,
+          "currentEnergyKwh": 500,
+          "energyStorageKwh": 500,
+          "reserveKwh": 60,
+          "maxPowerOutputKw": 40,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 0,
+            "active": 0,
+            "damaged": 0
+          }
+        },
+        "capabilities": [
+          "power-storage"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_basic-suitport",
+        "blueprintId": "basic-suitport",
+        "displayName": "Basic Suitport Blueprint",
+        "description": "Provides limited exterior access for short, careful EVAs. Useful for inspection and light work, but not bulk cargo transfer or routine surface operations.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "basic-suitport",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 50,
+          "ferrite": 45,
+          "volatile-compounds": 10,
+          "conductive-ore": 8
+        },
+        "productionCost": {
+          "power": 3
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 120,
+        "prerequisites": [
+          "life-support"
+        ],
+        "unlocks": [
+          "limited-eva"
+        ],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [
+          {
+            "pointType": "external",
+            "attachTo": [
+              "life-support"
+            ],
+            "quantity": 1
+          }
+        ],
+        "runtimeAttributes": {
+          "health": 100,
+          "status": "idle",
+          "crewCapacity": 1,
+          "physicalVolumeM3": 4,
+          "cargoTransferRating": "poor",
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 0.5,
+            "active": 2,
+            "damaged": 0.5
+          },
+          "crewAccessCapacity": 1
+        },
+        "capabilities": [
+          "limited-eva",
+          "suitport-access"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_battery-bank",
+        "blueprintId": "battery-bank",
+        "displayName": "Battery Bank Blueprint",
+        "description": "Expands stored energy capacity for longer outages, overnight operation, dust storms, and automation-heavy systems.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "battery-bank",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 90,
+          "ferrite": 60,
+          "conductive-ore": 22
+        },
+        "productionCost": {
+          "power": 2
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 240,
+        "prerequisites": [
+          "small-solar-array"
+        ],
+        "unlocks": [
+          "overnight-autonomy-level-1"
+        ],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 0,
+            "active": 0,
+            "damaged": 0
+          },
+          "status": "online",
+          "crewCapacity": 0,
+          "energyStorageKwh": 420,
+          "maxPowerOutputKw": 60
+        },
+        "capabilities": [
+          "large-power-storage"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_command-module",
+        "blueprintId": "command-module",
+        "displayName": "Command Module Blueprint",
+        "description": "The habitat's operations core. If it is missing, offline, or badly damaged, other systems cannot coordinate normally and many habitat functions stop or become degraded.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "command-module",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 360,
+          "ferrite": 220,
+          "conductive-ore": 40,
+          "rare-catalyst": 8
+        },
+        "productionCost": {
+          "power": 8
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 480,
+        "prerequisites": [],
+        "unlocks": [],
+        "repeatable": false,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {
+          "pressurized": 3,
+          "external": 1
+        },
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "status": "active",
+          "crewCapacity": 2,
+          "pressurizedVolumeM3": 60,
+          "dataStorageTb": 4,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 2,
+            "active": 2,
+            "damaged": 2
+          }
+        },
+        "capabilities": [
+          "habitat-command"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_communications-array",
+        "blueprintId": "communications-array",
+        "displayName": "Communications Array Blueprint",
+        "description": "Provides long-range communication capacity for coordination, reporting, and later multi-habitat or agent-assisted workflows.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "communications-array",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 90,
+          "ferrite": 80,
+          "silicate-glass": 30,
+          "conductive-ore": 30
+        },
+        "productionCost": {
+          "power": 2
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 240,
+        "prerequisites": [
+          "command-module"
+        ],
+        "unlocks": [
+          "habitat-coordination"
+        ],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 2.2,
+            "active": 2.2,
+            "damaged": 2.2
+          },
+          "peakPowerDrawKw": 3.5,
+          "status": "online",
+          "crewCapacity": 0,
+          "bandwidthTbPerHour": 0.2
+        },
+        "capabilities": [
+          "long-range-communications"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_greenhouse",
+        "blueprintId": "greenhouse",
+        "displayName": "Greenhouse Blueprint",
+        "description": "Produces food over time and improves crew sustainability, while adding power, water, lighting, humidity, and failure-management demands.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "greenhouse",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 260,
+          "ferrite": 120,
+          "silicate-glass": 140,
+          "volatile-compounds": 36,
+          "conductive-ore": 12,
+          "ice-regolith": 40
+        },
+        "productionCost": {
+          "power": 6,
+          "water": 8
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 420,
+        "prerequisites": [
+          "water-recycler"
+        ],
+        "unlocks": [
+          "food-production"
+        ],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 3,
+            "active": 3,
+            "damaged": 3
+          },
+          "peakPowerDrawKw": 4.5,
+          "status": "online",
+          "crewCapacity": 2,
+          "pressurizedVolumeM3": 45,
+          "waterUseKgPerHour": 2,
+          "foodOutputPerHour": 4,
+          "crewSupportBonus": 1
+        },
+        "capabilities": [
+          "food-production"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_life-support",
+        "blueprintId": "life-support",
+        "displayName": "Life Support Blueprint",
+        "description": "Maintains breathable atmosphere, pressure safety, oxygen buffering, water reserves, and basic crew survival margin inside the sealed habitat.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "life-support",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 220,
+          "ferrite": 140,
+          "volatile-compounds": 24,
+          "conductive-ore": 18,
+          "rare-catalyst": 4
+        },
+        "productionCost": {
+          "power": 6
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 300,
+        "prerequisites": [
+          "command-module"
+        ],
+        "unlocks": [],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {
+          "pressurized": 2,
+          "external": 1
+        },
+        "attachmentRequirements": [
+          {
+            "pointType": "pressurized",
+            "attachTo": [
+              "command-module"
+            ],
+            "quantity": 1
+          }
+        ],
+        "runtimeAttributes": {
+          "health": 100,
+          "status": "active",
+          "crewCapacity": 2,
+          "crewSupportNominal": 2,
+          "crewSupportEmergency": 3,
+          "pressurizedVolumeM3": 35,
+          "oxygenBufferKg": 120,
+          "waterBufferKg": 1200,
+          "co2WarningPpm": 2000,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 5,
+            "active": 5,
+            "damaged": 5
+          },
+          "oxygenProductionKgPerHour": 0.1,
+          "co2ScrubKgPerHour": 0.12
+        },
+        "capabilities": [
+          "atmosphere-control",
+          "redundant-life-support"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_main-airlock",
+        "blueprintId": "main-airlock",
+        "displayName": "Main Airlock Blueprint",
+        "description": "Provides pressure-safe routine surface access and safer cargo transfer between the habitat and the exterior.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "main-airlock",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 220,
+          "ferrite": 160,
+          "silicate-glass": 30,
+          "conductive-ore": 16
+        },
+        "productionCost": {
+          "power": 5
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 300,
+        "prerequisites": [
+          "life-support"
+        ],
+        "unlocks": [
+          "surface-access"
+        ],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 1,
+            "active": 1,
+            "damaged": 1
+          },
+          "cyclePowerKw": 3,
+          "status": "online",
+          "crewCapacity": 1,
+          "physicalVolumeM3": 14,
+          "cargoTransferRating": "moderate"
+        },
+        "capabilities": [
+          "surface-access"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_material-collector",
+        "blueprintId": "material-collector",
+        "displayName": "Material Collector Blueprint",
+        "description": "Enables rover-supported gathering of raw surface materials from discovered sites.",
+        "status": "published",
+        "output": {
+          "itemType": "equipment",
+          "moduleType": "material-collector",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 90,
+          "ferrite": 70,
+          "conductive-ore": 16
+        },
+        "productionCost": {
+          "power": 2
+        },
+        "requiredFacility": {
+          "moduleType": "rover-bay",
+          "minimumLevel": 1
+        },
+        "buildTicks": 240,
+        "prerequisites": [
+          "surface-survey-missions"
+        ],
+        "unlocks": [
+          "raw-material-collection",
+          "workshop-fabricator"
+        ],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 1.2,
+            "active": 1.2,
+            "damaged": 1.2
+          },
+          "status": "online",
+          "crewCapacity": 0,
+          "collectionRateKgPerHour": 60
+        },
+        "capabilities": [
+          "starter-resource-collection"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_rover-bay",
+        "blueprintId": "rover-bay",
+        "displayName": "Rover Bay Blueprint",
+        "description": "Provides sealed rover charging, storage, assembly, and maintenance support. Required before rovers can operate safely.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "rover-bay",
+          "quantity": 1,
+          "level": 1
+        },
+        "inputs": {
+          "basalt-composite": 180,
+          "ferrite": 110,
+          "conductive-ore": 18
+        },
+        "productionCost": {
+          "power": 2
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 300,
+        "prerequisites": [
+          "main-airlock"
+        ],
+        "unlocks": [
+          "rover"
+        ],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {
+          "moduleType": "rover-bay",
+          "from": 0,
+          "to": 1
+        },
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 2,
+            "active": 2,
+            "damaged": 2
+          },
+          "status": "online",
+          "crewCapacity": 1,
+          "pressurizedVolumeM3": 40,
+          "roverServiceCapacity": 2
+        },
+        "capabilities": [
+          "basic-rover-assembly",
+          "rover-charging"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_rover-bay-upgrade",
+        "blueprintId": "rover-bay-upgrade",
+        "displayName": "Rover Bay Upgrade Blueprint",
+        "description": "Improves rover servicing capacity and enables more capable extended survey operations.",
+        "status": "published",
+        "output": {
+          "itemType": "facility-upgrade",
+          "moduleType": "rover-bay",
+          "level": 2
+        },
+        "inputs": {
+          "basalt-composite": 220,
+          "ferrite": 160,
+          "conductive-ore": 35,
+          "silicate-glass": 20
+        },
+        "productionCost": {
+          "power": 4
+        },
+        "requiredFacility": {
+          "moduleType": "rover-bay",
+          "minimumLevel": 1
+        },
+        "buildTicks": 480,
+        "prerequisites": [
+          "surface-survey-missions"
+        ],
+        "unlocks": [
+          "extended-survey-rover"
+        ],
+        "repeatable": false,
+        "level": 2,
+        "target": {
+          "moduleType": "rover-bay",
+          "fromLevel": 1,
+          "toLevel": 2
+        },
+        "facilityLevel": {
+          "moduleType": "rover-bay",
+          "from": 1,
+          "to": 2
+        },
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 0,
+            "active": 0,
+            "damaged": 0
+          },
+          "status": "online",
+          "crewCapacity": 0,
+          "roverServiceCapacity": 4
+        },
+        "capabilities": [
+          "extended-rover-assembly",
+          "improved-rover-maintenance"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_sensor-mast",
+        "blueprintId": "sensor-mast",
+        "displayName": "Sensor Mast Blueprint",
+        "description": "Monitors dust, radiation, pressure, wind, and other external conditions for forecasting and safer planning.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "sensor-mast",
+          "quantity": 1
+        },
+        "inputs": {
+          "ferrite": 45,
+          "silicate-glass": 18,
+          "conductive-ore": 16,
+          "rare-catalyst": 2
+        },
+        "productionCost": {
+          "power": 2
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 180,
+        "prerequisites": [
+          "command-module"
+        ],
+        "unlocks": [
+          "early-storm-warning"
+        ],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 1.2,
+            "active": 1.2,
+            "damaged": 1.2
+          },
+          "status": "online",
+          "crewCapacity": 0,
+          "forecastRange": 2,
+          "mastHeightM": 9
+        },
+        "capabilities": [
+          "environment-sensing"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_small-solar-array",
+        "blueprintId": "small-solar-array",
+        "displayName": "Small Solar Array Blueprint",
+        "description": "Generates starter solar power during clear daylight, with reduced output during dust accumulation and storm conditions.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "small-solar-array",
+          "quantity": 1
+        },
+        "inputs": {
+          "ferrite": 90,
+          "silicate-glass": 45,
+          "conductive-ore": 18
+        },
+        "productionCost": {
+          "power": 3
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 180,
+        "prerequisites": [],
+        "unlocks": [],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 0,
+            "active": 0,
+            "damaged": 0
+          },
+          "status": "online",
+          "crewCapacity": 0,
+          "powerGenerationKw": 12,
+          "degradedStormGenerationKw": 3,
+          "maintenanceHoursPer100Ticks": 4,
+          "surfaceAreaM2": 28
+        },
+        "capabilities": [
+          "solar-generation"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_storage-module",
+        "blueprintId": "storage-module",
+        "displayName": "Storage Module Blueprint",
+        "description": "Increases storage capacity for gathered resources, spare parts, and construction inputs as the habitat grows.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "storage-module",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 110,
+          "ferrite": 55
+        },
+        "productionCost": {
+          "power": 1
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 180,
+        "prerequisites": [
+          "supply-cache"
+        ],
+        "unlocks": [],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 0.2,
+            "active": 0.2,
+            "damaged": 0.2
+          },
+          "status": "online",
+          "crewCapacity": 0,
+          "storageMassKg": 12000,
+          "cargoVolumeM3": 36
+        },
+        "capabilities": [
+          "bulk-storage"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_supply-cache",
+        "blueprintId": "supply-cache",
+        "displayName": "Supply Cache Blueprint",
+        "description": "Holds the habitat's starter inventory: food, water, repair kits, spare materials, and other supplies needed before local production matures.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "supply-cache",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 120,
+          "ferrite": 40
+        },
+        "productionCost": {
+          "power": 2
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 120,
+        "prerequisites": [
+          "command-module"
+        ],
+        "unlocks": [],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 0.5,
+            "active": 0.5,
+            "damaged": 0
+          },
+          "status": "active",
+          "crewCapacity": 0,
+          "currentEnergyKwh": 0,
+          "energyStorageKwh": 0,
+          "maxPowerOutputKw": 0,
+          "powerGenerationKw": 0,
+          "storageVolumeM3": 0,
+          "crewAccessCapacity": 0,
+          "oxygenProductionKgPerHour": 0,
+          "co2ScrubKgPerHour": 0,
+          "suitOxygenCapacityKg": 0,
+          "suitOxygenRemainingKg": 0,
+          "suitOxygenUseKgPerHour": 0,
+          "waterUseLitersPerPersonPerHour": 0,
+          "sunlightIrradianceKwPerM2": 0,
+          "storedResources": {},
+          "dataCapacityGb": 0,
+          "maintenanceLoadTicks": 0
+        },
+        "capabilities": [
+          "storage"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_survey-rover",
+        "blueprintId": "survey-rover",
+        "displayName": "Survey Rover Blueprint",
+        "description": "Scouts nearby terrain, discovers resource sites, and extends the habitat's operational reach beyond walking distance.",
+        "status": "published",
+        "output": {
+          "itemType": "rover",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 120,
+          "ferrite": 80,
+          "conductive-ore": 12
+        },
+        "productionCost": {
+          "power": 2
+        },
+        "requiredFacility": {},
+        "buildTicks": 300,
+        "prerequisites": [],
+        "unlocks": [
+          "surface-survey-missions",
+          "material-collector"
+        ],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 1,
+            "active": 1,
+            "damaged": 1
+          },
+          "status": "active",
+          "crewCapacity": 1,
+          "currentEnergyKwh": 0,
+          "energyStorageKwh": 0,
+          "maxPowerOutputKw": 0,
+          "powerGenerationKw": 0,
+          "storageVolumeM3": 0,
+          "crewAccessCapacity": 0,
+          "oxygenProductionKgPerHour": 0,
+          "co2ScrubKgPerHour": 0,
+          "suitOxygenCapacityKg": 0,
+          "suitOxygenRemainingKg": 0,
+          "suitOxygenUseKgPerHour": 0,
+          "waterUseLitersPerPersonPerHour": 0,
+          "sunlightIrradianceKwPerM2": 0,
+          "storedResources": {},
+          "dataCapacityGb": 0,
+          "maintenanceLoadTicks": 0
+        },
+        "capabilities": [
+          "starter-survey",
+          "nearby-resource-discovery"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_water-recycler",
+        "blueprintId": "water-recycler",
+        "displayName": "Water Recycler Blueprint",
+        "description": "Recovers and stabilizes water supply, improving long-term crew support and enabling water-intensive expansion.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "water-recycler",
+          "quantity": 1
+        },
+        "inputs": {
+          "basalt-composite": 160,
+          "ferrite": 110,
+          "volatile-compounds": 20,
+          "conductive-ore": 16
+        },
+        "productionCost": {
+          "power": 5
+        },
+        "requiredFacility": {
+          "moduleType": "workshop-fabricator",
+          "minimumLevel": 1
+        },
+        "buildTicks": 300,
+        "prerequisites": [
+          "life-support"
+        ],
+        "unlocks": [
+          "greenhouse"
+        ],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {},
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 2.5,
+            "active": 2.5,
+            "damaged": 2.5
+          },
+          "status": "online",
+          "crewCapacity": 0,
+          "physicalVolumeM3": 12,
+          "waterRecoveryKgPerHour": 45
+        },
+        "capabilities": [
+          "water-recovery"
+        ]
+      },
+      {
+        "id": "blueprint_kepler-442b-v1_workshop-fabricator",
+        "blueprintId": "workshop-fabricator",
+        "displayName": "Workshop Fabricator Blueprint",
+        "description": "Turns blueprint plans and raw materials into actual modules and equipment, making it the bridge from starter supplies to local construction.",
+        "status": "published",
+        "output": {
+          "itemType": "module",
+          "moduleType": "workshop-fabricator",
+          "quantity": 1,
+          "level": 1
+        },
+        "inputs": {
+          "basalt-composite": 260,
+          "ferrite": 180,
+          "conductive-ore": 36,
+          "rare-catalyst": 4
+        },
+        "productionCost": {
+          "power": 7
+        },
+        "requiredFacility": {
+          "moduleType": "rover-bay",
+          "minimumLevel": 1
+        },
+        "buildTicks": 360,
+        "prerequisites": [
+          "material-collector"
+        ],
+        "unlocks": [
+          "basic-fabrication",
+          "construction-automation"
+        ],
+        "repeatable": true,
+        "level": null,
+        "target": {},
+        "facilityLevel": {
+          "moduleType": "workshop-fabricator",
+          "from": 0,
+          "to": 1
+        },
+        "attachmentPoints": {},
+        "attachmentRequirements": [],
+        "runtimeAttributes": {
+          "health": 100,
+          "status": "idle",
+          "crewCapacity": 1,
+          "physicalVolumeM3": 20,
+          "rawMaterialBufferKg": 1500,
+          "inProcessStorageM3": 3,
+          "powerDrawKw": {
+            "offline": 0,
+            "idle": 1,
+            "active": 8,
+            "damaged": 1
+          }
+        },
+        "capabilities": [
+          "basic-fabrication"
+        ]
+      }
+    ],
+    "habitatSlug": "george-s-shack-bd09e90f",
+    "status": "registered",
+    "catalogVersion": "kepler-442b-v1",
+    "lastSeenAt": "2026-07-07T15:51:53.320Z"
+  },
+  "modules": [
+    {
+      "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_command_module_1",
+      "blueprintId": "command-module",
+      "displayName": "Command Module",
+      "runtimeAttributes": {
+        "health": 100,
+        "status": "active",
+        "crewCapacity": 2,
+        "pressurizedVolumeM3": 60,
+        "dataStorageTb": 4,
+        "powerDrawKw": {
+          "offline": 0,
+          "idle": 2,
+          "active": 2,
+          "damaged": 2
+        }
+      },
+      "capabilities": [
+        "habitat-command"
+      ],
+      "connectedTo": []
+    },
+    {
+      "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_life_support_1",
+      "blueprintId": "life-support",
+      "displayName": "Life Support",
+      "runtimeAttributes": {
+        "health": 100,
+        "status": "active",
+        "crewCapacity": 2,
+        "crewSupportNominal": 2,
+        "crewSupportEmergency": 3,
+        "pressurizedVolumeM3": 35,
+        "oxygenBufferKg": 120,
+        "waterBufferKg": 1200,
+        "co2WarningPpm": 2000,
+        "powerDrawKw": {
+          "offline": 0,
+          "idle": 5,
+          "active": 5,
+          "damaged": 5
+        },
+        "oxygenProductionKgPerHour": 0.1,
+        "co2ScrubKgPerHour": 0.12
+      },
+      "capabilities": [
+        "atmosphere-control",
+        "redundant-life-support"
+      ],
+      "connectedTo": []
+    },
+    {
+      "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_basic_battery_1",
+      "blueprintId": "basic-battery",
+      "displayName": "Basic Battery",
+      "runtimeAttributes": {
+        "health": 90,
+        "status": "active",
+        "crewCapacity": 0,
+        "physicalVolumeM3": 8,
+        "currentEnergyKwh": 500,
+        "energyStorageKwh": 500,
+        "reserveKwh": 60,
+        "maxPowerOutputKw": 40,
+        "powerDrawKw": {
+          "offline": 0,
+          "idle": 0,
+          "active": 0,
+          "damaged": 0
+        }
+      },
+      "capabilities": [
+        "power-storage"
+      ],
+      "connectedTo": []
+    },
+    {
+      "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_supply_cache_1",
+      "blueprintId": "supply-cache",
+      "displayName": "Supply Cache",
+      "runtimeAttributes": {
+        "health": 100,
+        "powerDrawKw": {
+          "offline": 0,
+          "idle": 0.5,
+          "active": 0.5,
+          "damaged": 0
+        },
+        "status": "active",
+        "crewCapacity": 0,
+        "currentEnergyKwh": 0,
+        "energyStorageKwh": 0,
+        "maxPowerOutputKw": 0,
+        "powerGenerationKw": 0,
+        "storageVolumeM3": 0,
+        "crewAccessCapacity": 0,
+        "oxygenProductionKgPerHour": 0,
+        "co2ScrubKgPerHour": 0,
+        "suitOxygenCapacityKg": 0,
+        "suitOxygenRemainingKg": 0,
+        "suitOxygenUseKgPerHour": 0,
+        "waterUseLitersPerPersonPerHour": 0,
+        "sunlightIrradianceKwPerM2": 0,
+        "storedResources": {},
+        "dataCapacityGb": 0,
+        "maintenanceLoadTicks": 0
+      },
+      "capabilities": [
+        "storage"
+      ],
+      "connectedTo": []
+    },
+    {
+      "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_workshop_fabricator_1",
+      "blueprintId": "workshop-fabricator",
+      "displayName": "Workshop Fabricator",
+      "runtimeAttributes": {
+        "health": 100,
+        "status": "idle",
+        "crewCapacity": 1,
+        "physicalVolumeM3": 20,
+        "rawMaterialBufferKg": 1500,
+        "inProcessStorageM3": 3,
+        "powerDrawKw": {
+          "offline": 0,
+          "idle": 1,
+          "active": 8,
+          "damaged": 1
+        }
+      },
+      "capabilities": [
+        "basic-fabrication"
+      ],
+      "connectedTo": []
+    },
+    {
+      "id": "habitat_bd09e90f_d7c3_4902_b02e_3db495cf9dfb_basic_suitport_1",
+      "blueprintId": "basic-suitport",
+      "displayName": "Basic Suitport",
+      "runtimeAttributes": {
+        "health": 100,
+        "status": "idle",
+        "crewCapacity": 1,
+        "physicalVolumeM3": 4,
+        "cargoTransferRating": "poor",
+        "powerDrawKw": {
+          "offline": 0,
+          "idle": 0.5,
+          "active": 2,
+          "damaged": 0.5
+        },
+        "crewAccessCapacity": 1
+      },
+      "capabilities": [
+        "limited-eva",
+        "suitport-access"
+      ],
+      "connectedTo": []
+    }
+  ]
 }
