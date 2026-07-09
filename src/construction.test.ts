@@ -103,11 +103,11 @@ describe("construction preview", () => {
     const state = createState();
     const before = JSON.parse(JSON.stringify(state));
 
-    const preview = previewConstruction(state, smallSolarArrayBlueprint, () => "build_1");
+    const preview = previewConstruction(state, smallSolarArrayBlueprint);
 
     expect(preview.blueprintId).toBe("small-solar-array");
     expect(preview.facilityId).toBe("habitat_123_workshop_fabricator_1");
-    expect(preview.outputModuleId).toBe("local_small_solar_array_build_1");
+    expect(preview.outputModuleId).toBe("local_small_solar_array_1");
     expect(preview.totalTicks).toBe(180);
     expect(preview.requiredFacilityExists).toBe(true);
     expect(preview.facilityAvailable).toBe(true);
@@ -127,7 +127,7 @@ describe("construction preview", () => {
     const state = createState();
     state.modules?.[1] && (state.modules[1].runtimeAttributes.status = "offline");
 
-    expect(() => previewConstruction(state, smallSolarArrayBlueprint, () => "build_1")).toThrow(
+    expect(() => previewConstruction(state, smallSolarArrayBlueprint)).toThrow(
       'Supply cache must be online before starting "small-solar-array".',
     );
   });
@@ -136,7 +136,7 @@ describe("construction preview", () => {
     const state = createState();
     state.modules = (state.modules ?? []).filter((module) => module.blueprintId !== "command-module");
 
-    expect(() => previewConstruction(state, smallSolarArrayBlueprint, () => "build_1")).toThrow(
+    expect(() => previewConstruction(state, smallSolarArrayBlueprint)).toThrow(
       'Prerequisites are not met for "small-solar-array". Missing: command-module.',
     );
   });
@@ -146,12 +146,12 @@ describe("construction start and cancel", () => {
   test("starts a construction job, spends inventory, and marks the workshop active", () => {
     const state = createState();
 
-    const result = startConstruction(state, smallSolarArrayBlueprint, () => "build_1");
+    const result = startConstruction(state, smallSolarArrayBlueprint);
     const facility = state.modules?.[0];
 
     expect(result.facilityId).toBe("habitat_123_workshop_fabricator_1");
     expect(result.remainingTicks).toBe(180);
-    expect(result.outputModuleId).toBe("local_small_solar_array_build_1");
+    expect(result.outputModuleId).toBe("local_small_solar_array_1");
     expect(state.inventory).toEqual({
       ferrite: 30,
       "silicate-glass": 15,
@@ -163,7 +163,7 @@ describe("construction start and cancel", () => {
       displayName: "Small Solar Array Blueprint",
       outputItemType: "module",
       outputModuleType: "small-solar-array",
-      outputModuleId: "local_small_solar_array_build_1",
+      outputModuleId: "local_small_solar_array_1",
       totalTicks: 180,
       remainingTicks: 180,
       startedAtTick: 0,
@@ -183,7 +183,7 @@ describe("construction start and cancel", () => {
 
   test("cancels a construction job without refunding inventory", () => {
     const state = createState();
-    startConstruction(state, smallSolarArrayBlueprint, () => "build_1");
+    startConstruction(state, smallSolarArrayBlueprint);
 
     const result = cancelConstruction(state, state.modules?.[0] as ModuleRecord);
 
@@ -202,9 +202,9 @@ describe("construction start and cancel", () => {
 describe("construction tick integration", () => {
   test("decrements remaining ticks and creates the output module when the job completes", () => {
     const state = createState();
-    startConstruction(state, smallSolarArrayBlueprint, () => "build_1");
+    startConstruction(state, smallSolarArrayBlueprint);
 
-    const partialResult = advanceConstructionJobs(state, 60, () => "build_1");
+    const partialResult = advanceConstructionJobs(state, 60);
 
     expect(partialResult.completedModules).toEqual([]);
     expect(state.modules?.[0].runtimeAttributes.constructionJob).toMatchObject({
@@ -212,11 +212,11 @@ describe("construction tick integration", () => {
     });
     expect(state.modules?.[0].runtimeAttributes.status).toBe("active");
 
-    const completionResult = advanceConstructionJobs(state, 120, () => "build_2");
+    const completionResult = advanceConstructionJobs(state, 120);
 
     expect(completionResult.completedModules).toHaveLength(1);
     expect(completionResult.completedModules[0]).toMatchObject({
-      id: "local_small_solar_array_build_1",
+      id: "local_small_solar_array_1",
       blueprintId: "small-solar-array",
       displayName: "Small Solar Array",
       runtimeAttributes: {
@@ -233,13 +233,13 @@ describe("construction tick integration", () => {
 
   test("formats active construction jobs for status output", () => {
     const state = createState();
-    startConstruction(state, smallSolarArrayBlueprint, () => "build_1");
+    startConstruction(state, smallSolarArrayBlueprint);
 
     expect(formatConstructionStatus(state.modules ?? [])).toBe(
       [
-        "Facility              Blueprint          Remaining Ticks  Output",
-        "--------------------  -----------------  ---------------  ------",
-        "Workshop Fabricator   small-solar-array  180              module",
+        "Facility             Blueprint          Remaining Ticks  Output",
+        "-------------------  -----------------  ---------------  ------",
+        "Workshop Fabricator  small-solar-array  180              module",
       ].join("\n"),
     );
   });

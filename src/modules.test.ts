@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   findModuleById,
+  formatModuleList,
   formatModuleListItem,
   getShortModuleId,
   isModuleRuntimeStatus,
@@ -27,6 +28,16 @@ describe("module ID display", () => {
 
   test("formats module list rows with the short module ID", () => {
     expect(formatModuleListItem(moduleRecord)).toBe("command_module_1: Command Module (command-module) status=active");
+  });
+
+  test("formats module lists as a readable table", () => {
+    expect(formatModuleList([moduleRecord])).toBe(
+      [
+        "Module ID         Display Name    Blueprint       Status",
+        "----------------  --------------  --------------  ------",
+        "command_module_1  Command Module  command-module  active",
+      ].join("\n"),
+    );
   });
 
   test("finds modules by either full ID or short ID", () => {

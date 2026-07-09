@@ -21,18 +21,30 @@ import {
   previewConstruction,
   startConstruction,
 } from "./construction.js";
+import {
+  formatBoolean,
+  formatExamples,
+  formatKeyValueRows,
+  formatList,
+  formatRecordTable,
+  formatSection,
+  formatTable,
+  formatUnknownValue,
+} from "./cli-format.js";
 import { addInventoryResource, formatInventoryList } from "./inventory.js";
+import { createNextLocalModuleId } from "./local-module-ids.js";
 import { fetchResourceCatalog, formatResourceList } from "./resources.js";
+import { fetchSolarIrradiance, formatSolarStatus } from "./solar.js";
 import {
   findModuleById,
-  formatModuleListItem,
+  formatModuleList,
   getShortModuleId,
   isModuleRuntimeStatus,
   moduleRuntimeStatuses,
   setModuleRuntimeStatus,
   type ModuleRecord,
 } from "./modules.js";
-import { applyPowerTick, formatModulePowerStatusTable, getModulePowerDrawKw } from "./power.js";
+import { formatModulePowerStatusTable, getModulePowerDrawKw, runPowerSimulation } from "./power.js";
 
 type HabitatRegistrationRecord = {
   baseUrl: string;
@@ -124,15 +136,15 @@ function findProjectRootPath(): string {
 }
 
 const projectRootPath = findProjectRootPath();
-dotenv.config({ path: join(projectRootPath, ".env") });
+dotenv.config({ path: join(projectRootPath, ".env"), quiet: true });
 const dataFilePath = join(projectRootPath, "habitat.json");
 
 function exampleBlock(lines: string[]): string {
-  return `\nExamples:\n${lines.map((line) => `  ${line}`).join("\n")}\n`;
+  return `\n${formatExamples(lines)}\n`;
 }
 
 function sectionBlock(title: string, lines: string[]): string {
-  return `\n${title}:\n${lines.map((line) => `  ${line}`).join("\n")}\n`;
+  return `\n${formatSection(title, lines.map((line) => `- ${line}`).join("\n"))}\n`;
 }
 
 function getKeplerBaseUrl(): string {
@@ -236,37 +248,49 @@ async function deleteDataFileIfEmpty(state: LocalState): Promise<void> {
   }
 }
 
-function printRegistrationStatus(registration: HabitatRegistrationRecord): void {
-  console.log(`Display Name: ${registration.displayName}`);
-  console.log(`Habitat UUID: ${registration.habitatUuid}`);
-  console.log(`Habitat ID: ${registration.habitatId}`);
-  console.log(`Base URL: ${registration.baseUrl}`);
-  console.log(`Habitat Slug: ${registration.habitatSlug ?? "Unknown"}`);
-  console.log(`Status: ${registration.status ?? "Unknown"}`);
-  console.log(`Catalog Version: ${registration.catalogVersion ?? "Unknown"}`);
-  console.log(`Last Seen At: ${registration.lastSeenAt ?? "Unknown"}`);
-  console.log(`Starter Modules: ${registration.starterModules.length}`);
-  console.log(`Blueprints: ${registration.blueprints.length}`);
+function formatRegistrationStatus(registration: HabitatRegistrationRecord, moduleCount: number): string {
+  return formatSection(
+    "Habitat Registration",
+    formatKeyValueRows([
+      ["Display Name", registration.displayName],
+      ["Habitat UUID", registration.habitatUuid],
+      ["Habitat ID", registration.habitatId],
+      ["Base URL", registration.baseUrl],
+      ["Habitat Slug", registration.habitatSlug ?? "Unknown"],
+      ["Status", registration.status ?? "Unknown"],
+      ["Catalog Version", registration.catalogVersion ?? "Unknown"],
+      ["Last Seen At", registration.lastSeenAt ?? "Unknown"],
+      ["Starter Modules", String(registration.starterModules.length)],
+      ["Blueprints", String(registration.blueprints.length)],
+      ["Local Modules", String(moduleCount)],
+    ]),
+  );
 }
 
-function printModule(module: ModuleRecord): void {
-  console.log(`ID: ${module.id}`);
-  console.log(`Short ID: ${getShortModuleId(module)}`);
-  console.log(`Display Name: ${module.displayName}`);
-  console.log(`Blueprint ID: ${module.blueprintId}`);
-  console.log(`Status: ${module.runtimeAttributes.status ?? "Unknown"}`);
-  console.log(`Health: ${module.runtimeAttributes.health ?? "Unknown"}`);
-  console.log(`Connected To: ${module.connectedTo.length > 0 ? module.connectedTo.join(", ") : "None"}`);
-  console.log(`Capabilities: ${module.capabilities.length > 0 ? module.capabilities.join(", ") : "None"}`);
-  console.log(`Runtime Attributes: ${JSON.stringify(module.runtimeAttributes, null, 2)}`);
+function formatModuleDetails(module: ModuleRecord): string {
+  const summary = formatKeyValueRows([
+    ["ID", module.id],
+    ["Short ID", getShortModuleId(module)],
+    ["Display Name", module.displayName],
+    ["Blueprint ID", module.blueprintId],
+    ["Status", String(module.runtimeAttributes.status ?? "Unknown")],
+    ["Health", String(module.runtimeAttributes.health ?? "Unknown")],
+  ]);
+  const relationships = formatKeyValueRows([
+    ["Connected To", module.connectedTo.length > 0 ? module.connectedTo.join(", ") : "None"],
+    ["Capabilities", module.capabilities.length > 0 ? module.capabilities.join(", ") : "None"],
+  ]);
+  const runtimeAttributes = formatRecordTable(module.runtimeAttributes, "Attribute", "Value");
+
+  return [
+    formatSection("Module Summary", summary),
+    formatSection("Relationships", relationships),
+    formatSection("Runtime Attributes", runtimeAttributes),
+  ].join("\n\n");
 }
 
 function findBlueprint(state: LocalState, blueprintId: string): BlueprintRecord | undefined {
   return state.kepler?.blueprints.find((blueprint) => blueprint.blueprintId === blueprintId);
-}
-
-function createLocalModuleId(blueprintId: string): string {
-  return `local_${blueprintId.replace(/[^a-zA-Z0-9]+/g, "_")}_${randomUUID()}`;
 }
 
 function formatEnergy(value: number): string {
@@ -289,14 +313,18 @@ function getBlueprintInputInventory(blueprint: BlueprintRecord): Record<string, 
   return inventory;
 }
 
-function formatInventoryLines(inventory: Record<string, number>): string[] {
-  const resourceTypes = Object.keys(inventory).sort();
+function formatInventorySection(title: string, inventory: Record<string, number>): string {
+  return formatSection(title, formatInventoryList(inventory));
+}
 
-  if (resourceTypes.length === 0) {
-    return ["  none"];
+function formatResultSummary(title: string, rows: Array<[string, string]>, notes: string[] = []): string {
+  const sections = [formatSection(title, formatKeyValueRows(rows))];
+
+  if (notes.length > 0) {
+    sections.push(formatSection("Notes", formatList(notes)));
   }
 
-  return resourceTypes.map((resourceType) => `  ${resourceType}: ${formatEnergy(inventory[resourceType] ?? 0)}`);
+  return sections.join("\n\n");
 }
 
 function parseTickCount(count: string): number {
@@ -343,8 +371,14 @@ async function registerHabitat(options: RegisterOptions): Promise<void> {
   state.modules = registration.starterModules.map(cloneModule);
 
   await writeState(state);
-  console.log(`Registered habitat "${requestBody.displayName}" with Kepler.`);
-  console.log(`Habitat ID: ${registration.habitatId}`);
+  console.log(
+    formatResultSummary("Registration Complete", [
+      ["Display Name", requestBody.displayName],
+      ["Habitat ID", registration.habitatId],
+      ["Starter Modules", String(registration.starterModules.length)],
+      ["Blueprints", String(registration.blueprints.length)],
+    ]),
+  );
 }
 
 async function showHabitatRegistrationStatus(): Promise<void> {
@@ -374,8 +408,7 @@ async function showHabitatRegistrationStatus(): Promise<void> {
   };
 
   await writeState(state);
-  printRegistrationStatus(state.kepler);
-  console.log(`Modules: ${state.modules?.length ?? 0}`);
+  console.log(formatRegistrationStatus(state.kepler, state.modules?.length ?? 0));
 }
 
 async function unregisterHabitat(): Promise<void> {
@@ -395,7 +428,12 @@ async function unregisterHabitat(): Promise<void> {
   delete state.kepler;
   await deleteDataFileIfEmpty(state);
 
-  console.log(`Unregistered habitat "${deletedDisplayName}" from Kepler.`);
+  console.log(
+    formatResultSummary("Unregistration Complete", [
+      ["Display Name", deletedDisplayName],
+      ["Status", "Removed from Kepler"],
+    ]),
+  );
 }
 
 async function listBlueprints(): Promise<void> {
@@ -434,11 +472,33 @@ async function listResources(): Promise<void> {
       headers: getKeplerHeaders(),
     });
 
-    console.log("Resource catalog: possible resource types in the Kepler world.");
-    console.log("This is not your habitat's local inventory.");
-    console.log("Blueprint requirements will refer to these resource names later.");
-    console.log("");
-    console.log(formatResourceList(resources));
+    console.log(
+      [
+        formatSection(
+          "Resource Catalog",
+          formatList([
+            "Possible resource types in the Kepler world.",
+            "This is not your habitat's local inventory.",
+            "Blueprint requirements will refer to these resource names later.",
+          ]),
+        ),
+        formatResourceList(resources),
+      ].join("\n\n"),
+    );
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function showSolarStatus(): Promise<void> {
+  try {
+    const irradiance = await fetchSolarIrradiance({
+      baseUrl: getKeplerBaseUrl(),
+      headers: getKeplerHeaders(),
+    });
+
+    console.log(formatSolarStatus(irradiance));
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -458,45 +518,53 @@ async function constructBlueprint(blueprintId: string, options: ConstructOptions
     const requiredInventory = getBlueprintInputInventory(blueprint);
 
     if (options.dryRun) {
-      console.log(`Construction dry run for "${blueprint.blueprintId}".`);
-      console.log(`Facility: ${preview.facilityDisplayName} (${preview.facilityId})`);
-      console.log(`Output Module ID: ${preview.outputModuleId}`);
-      console.log(`Build Ticks: ${preview.totalTicks}`);
-      console.log("Checks:");
-      console.log(`  required facility exists: ${preview.requiredFacilityExists ? "yes" : "no"}`);
-      console.log(`  fabricator available: ${preview.facilityAvailable ? "yes" : "no"}`);
-      console.log(`  supply cache online: ${preview.supplyCacheOnline ? "yes" : "no"}`);
-      console.log(`  prerequisites met: ${preview.prerequisitesMet ? "yes" : "no"}`);
-      console.log(`  enough local inventory: ${Object.keys(preview.missingResources).length === 0 ? "yes" : "no"}`);
-      console.log(`  construction can start: ${preview.canStart ? "yes" : "no"}`);
-      console.log("Materials Required:");
-
-      for (const line of formatInventoryLines(requiredInventory)) {
-        console.log(line);
-      }
-
-      console.log("Inventory After:");
-
-      for (const line of formatInventoryLines(preview.inventoryAfter)) {
-        console.log(line);
-      }
-
-      console.log("No local files were changed.");
+      console.log(
+        [
+          formatSection(
+            "Construction Dry Run",
+            formatKeyValueRows([
+              ["Blueprint", blueprint.blueprintId],
+              ["Facility", `${preview.facilityDisplayName} (${preview.facilityId})`],
+              ["Output Module ID", preview.outputModuleId],
+              ["Build Ticks", String(preview.totalTicks)],
+            ]),
+          ),
+          formatSection(
+            "Checks",
+            formatTable(
+              ["Check", "Result"],
+              [
+                ["Required Facility Exists", formatBoolean(preview.requiredFacilityExists)],
+                ["Fabricator Available", formatBoolean(preview.facilityAvailable)],
+                ["Supply Cache Online", formatBoolean(preview.supplyCacheOnline)],
+                ["Prerequisites Met", formatBoolean(preview.prerequisitesMet)],
+                ["Enough Local Inventory", formatBoolean(Object.keys(preview.missingResources).length === 0)],
+                ["Construction Can Start", formatBoolean(preview.canStart)],
+              ],
+            ),
+          ),
+          formatInventorySection("Materials Required", requiredInventory),
+          formatInventorySection("Inventory After", preview.inventoryAfter),
+          formatSection("Notes", formatList(["No local files were changed."])),
+        ].join("\n\n"),
+      );
       return;
     }
 
     const startedJob = startConstruction(state, blueprint);
     await writeState(state);
 
-    console.log(`Started construction for "${blueprint.blueprintId}".`);
-    console.log(`Facility: ${preview.facilityDisplayName} (${startedJob.facilityId})`);
-    console.log(`Output Module ID: ${startedJob.outputModuleId}`);
-    console.log(`Remaining Ticks: ${startedJob.remainingTicks}`);
-    console.log("Inventory After:");
-
-    for (const line of formatInventoryLines(state.inventory ?? {})) {
-      console.log(line);
-    }
+    console.log(
+      [
+        formatResultSummary("Construction Started", [
+          ["Blueprint", blueprint.blueprintId],
+          ["Facility", `${preview.facilityDisplayName} (${startedJob.facilityId})`],
+          ["Output Module ID", startedJob.outputModuleId],
+          ["Remaining Ticks", String(startedJob.remainingTicks)],
+        ]),
+        formatInventorySection("Inventory After", state.inventory ?? {}),
+      ].join("\n\n"),
+    );
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -520,8 +588,13 @@ async function cancelConstructionCommand(facilityModuleId: string): Promise<void
   try {
     const result = cancelConstruction(state, facility);
     await writeState(state);
-    console.log(`Canceled construction on ${result.facilityId}.`);
-    console.log("Materials were not refunded.");
+    console.log(
+      formatResultSummary(
+        "Construction Canceled",
+        [["Facility ID", result.facilityId]],
+        ["Materials were not refunded."],
+      ),
+    );
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -545,23 +618,20 @@ async function addInventory(resourceId: string, amount: string): Promise<void> {
   const result = addInventoryResource(state, resourceId, numericAmount);
   await writeState(state);
 
-  console.log(`Added ${formatEnergy(numericAmount)} ${resourceId} to local inventory.`);
-  console.log(`Previous Amount: ${formatEnergy(result.previousAmount)}`);
-  console.log(`New Amount: ${formatEnergy(result.newAmount)}`);
+  console.log(
+    formatResultSummary("Inventory Updated", [
+      ["Resource", resourceId],
+      ["Added", formatEnergy(numericAmount)],
+      ["Previous Amount", formatEnergy(result.previousAmount)],
+      ["New Amount", formatEnergy(result.newAmount)],
+    ]),
+  );
 }
 
 async function listModules(): Promise<void> {
   const state = await readAndPersistState();
   const modules = state.modules ?? [];
-
-  if (modules.length === 0) {
-    console.log("No modules found.");
-    return;
-  }
-
-  for (const module of modules) {
-    console.log(formatModuleListItem(module));
-  }
+  console.log(formatModuleList(modules));
 }
 
 async function showModulePowerStatus(): Promise<void> {
@@ -578,7 +648,7 @@ async function showModule(moduleId: string): Promise<void> {
     process.exit(1);
   }
 
-  printModule(module);
+  console.log(formatModuleDetails(module));
 }
 
 async function setModuleStatus(moduleId: string, status: string): Promise<void> {
@@ -599,7 +669,11 @@ async function setModuleStatus(moduleId: string, status: string): Promise<void> 
   await writeState(state);
 
   console.log(
-    `Updated ${getShortModuleId(module)} to ${status}. Current power draw: ${formatEnergy(getModulePowerDrawKw(module))} kW.`,
+    formatResultSummary("Module Status Updated", [
+      ["Module ID", getShortModuleId(module)],
+      ["Status", status],
+      ["Current Power Draw", `${formatEnergy(getModulePowerDrawKw(module))} kW`],
+    ]),
   );
 }
 
@@ -618,7 +692,7 @@ async function createModule(options: ModuleCreateOptions): Promise<void> {
   }
 
   const module: ModuleRecord = {
-    id: createLocalModuleId(options.blueprintId),
+    id: createNextLocalModuleId(state.modules, options.blueprintId),
     blueprintId: blueprint.blueprintId,
     displayName: options.name,
     connectedTo: [],
@@ -629,9 +703,14 @@ async function createModule(options: ModuleCreateOptions): Promise<void> {
   state.modules = [...(state.modules ?? []), module];
   await writeState(state);
 
-  console.log(`Created module "${module.displayName}".`);
-  console.log(`Module ID: ${getShortModuleId(module)}`);
-  console.log(`Full ID: ${module.id}`);
+  console.log(
+    formatResultSummary("Module Created", [
+      ["Display Name", module.displayName],
+      ["Module ID", getShortModuleId(module)],
+      ["Full ID", module.id],
+      ["Blueprint", module.blueprintId],
+    ]),
+  );
 }
 
 async function updateModule(moduleId: string, options: ModuleUpdateOptions): Promise<void> {
@@ -663,7 +742,14 @@ async function updateModule(moduleId: string, options: ModuleUpdateOptions): Pro
   }
 
   await writeState(state);
-  console.log(`Updated module "${getShortModuleId(module)}".`);
+  console.log(
+    formatResultSummary("Module Updated", [
+      ["Module ID", getShortModuleId(module)],
+      ["Display Name", module.displayName],
+      ["Status", String(module.runtimeAttributes.status ?? "Unknown")],
+      ["Health", String(module.runtimeAttributes.health ?? "Unknown")],
+    ]),
+  );
 }
 
 async function deleteModule(moduleId: string): Promise<void> {
@@ -682,7 +768,12 @@ async function deleteModule(moduleId: string): Promise<void> {
   }
 
   await deleteDataFileIfEmpty(state);
-  console.log(`Deleted module "${getShortModuleId(module)}".`);
+  console.log(
+    formatResultSummary("Module Deleted", [
+      ["Module ID", getShortModuleId(module)],
+      ["Display Name", module.displayName],
+    ]),
+  );
 }
 
 async function runTicks(count: string): Promise<void> {
@@ -690,38 +781,62 @@ async function runTicks(count: string): Promise<void> {
   const state = await readAndPersistState();
 
   try {
-    const result = applyPowerTick(state, tickCount);
+    const result = await runPowerSimulation(state, tickCount, () =>
+      fetchSolarIrradiance({
+        baseUrl: getKeplerBaseUrl(),
+        headers: getKeplerHeaders(),
+      }),
+    );
     const constructionResult = advanceConstructionJobs(state, tickCount);
     await writeState(state);
 
     const battery = findModuleById(state.modules, result.batteryId);
     const batteryLabel = battery ? getShortModuleId(battery) : result.batteryId;
 
-    console.log(`Advanced ${result.tickCount} tick(s).`);
-    console.log(`Current Tick: ${result.currentTick}`);
-    console.log(`Power Draw: ${formatEnergy(result.totalPowerDrawKw)} kW`);
-    console.log(`Energy Requested: ${formatEnergy(result.energyRequestedKwh)} kWh`);
-    console.log(`Energy Drained: ${formatEnergy(result.energyDrainedKwh)} kWh`);
+    const sections = [
+      formatSection(
+        "Tick Summary",
+        formatKeyValueRows([
+          ["Ticks Advanced", String(result.tickCount)],
+          ["Current Tick", String(result.currentTick)],
+          ["Power Draw", `${formatEnergy(result.totalPowerDrawKw)} kW`],
+          ["Energy Requested", `${formatEnergy(result.energyRequestedKwh)} kWh`],
+          ["Energy Drained", `${formatEnergy(result.energyDrainedKwh)} kWh`],
+          ["Power Shortfall", `${formatEnergy(result.powerShortfallKwh)} kWh`],
+          ["Battery", batteryLabel],
+          ["Battery Remaining", `${formatEnergy(result.batteryEnergyRemainingKwh)} kWh`],
+          ["Solar Generated", `${formatEnergy(result.solarGeneratedKwh)} kWh`],
+        ]),
+      ),
+    ];
 
     if (result.powerShortfallKwh > 0) {
-      console.log(`Power Shortfall: ${formatEnergy(result.powerShortfallKwh)} kWh`);
+      sections.push(
+        formatSection("Warnings", formatList(["Battery did not have enough energy for the full power demand."])),
+      );
     }
 
-    console.log(`Battery: ${batteryLabel}`);
-    console.log(`Battery Remaining: ${formatEnergy(result.batteryEnergyRemainingKwh)} kWh`);
-
-    if (result.powerShortfallKwh > 0) {
-      console.log("Warning: battery did not have enough energy for the full power demand.");
+    if (result.solarNoChargeReasons.length > 0) {
+      sections.push(formatSection("Solar Notes", formatList(result.solarNoChargeReasons)));
     }
 
     if (constructionResult.completedModules.length > 0) {
-      console.log("");
-      console.log("Construction Completed:");
-
-      for (const module of constructionResult.completedModules) {
-        console.log(`- ${module.displayName} (${module.id})`);
-      }
+      sections.push(
+        formatSection(
+          "Construction Completed",
+          formatTable(
+            ["Display Name", "Module ID", "Blueprint"],
+            constructionResult.completedModules.map((module) => [
+              module.displayName,
+              getShortModuleId(module),
+              module.blueprintId,
+            ]),
+          ),
+        ),
+      );
     }
+
+    console.log(sections.join("\n\n"));
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -834,6 +949,10 @@ const resourceCommand = program
   .command("resource")
   .description("Read official Kepler resource catalog data.");
 
+const solarCommand = program
+  .command("solar")
+  .description("Read live Kepler solar irradiance data.");
+
 const constructionCommand = program
   .command("construction")
   .description("Inspect or cancel local construction jobs.");
@@ -875,6 +994,12 @@ resourceCommand
   .description("List official resource types used by Kepler.")
   .action(listResources)
   .addHelpText("after", exampleBlock(["habitat resource list"]));
+
+solarCommand
+  .command("status")
+  .description("Show current Kepler solar irradiance conditions.")
+  .action(showSolarStatus)
+  .addHelpText("after", exampleBlock(["habitat solar status"]));
 
 inventoryCommand.addHelpText(
   "after",

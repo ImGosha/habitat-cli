@@ -1,3 +1,5 @@
+import { formatTable } from "./cli-format.js";
+
 export type Inventory = Record<string, number>;
 
 export type InventoryState = {
@@ -45,20 +47,8 @@ export function formatInventoryList(inventory: Inventory): string {
     return "No local inventory resources found.";
   }
 
-  const rows = resourceIds.map((resourceId) => ({
-    resourceId,
-    amount: formatAmount(getInventoryAmount(inventory, resourceId)),
-  }));
-  const resourceWidth = Math.max("Resource".length, ...rows.map((row) => row.resourceId.length), 16);
-  const amountWidth = Math.max("Amount".length, ...rows.map((row) => row.amount.length));
-  const lines = [
-    `${"Resource".padEnd(resourceWidth)}  ${"Amount".padEnd(amountWidth)}`,
-    `${"-".repeat(resourceWidth)}  ${"-".repeat(amountWidth)}`,
-  ];
-
-  for (const row of rows) {
-    lines.push(`${row.resourceId.padEnd(resourceWidth)}  ${row.amount}`);
-  }
-
-  return lines.join("\n");
+  return formatTable(
+    ["Resource", "Amount"],
+    resourceIds.map((resourceId) => [resourceId, formatAmount(getInventoryAmount(inventory, resourceId))]),
+  );
 }

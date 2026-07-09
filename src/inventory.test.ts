@@ -18,11 +18,11 @@ describe("inventory list", () => {
 
     expect(formatInventoryList(state.inventory ?? {})).toBe(
       [
-        "Resource          Amount",
-        "----------------  ------",
-        "ferrite           30",
-        "silicate-glass    15",
-        "water             120",
+        "Resource        Amount",
+        "--------------  ------",
+        "ferrite         30",
+        "silicate-glass  15",
+        "water           120",
       ].join("\n"),
     );
   });

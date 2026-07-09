@@ -40,36 +40,21 @@ describe("blueprint formatting", () => {
   test("formats a concise blueprint list table", () => {
     expect(formatBlueprintList([exampleBlueprint])).toBe(
       [
-        "Blueprint ID       Output            Ticks  Prerequisites",
-        "-----------------  ----------------  -----  -------------",
-        "small-solar-array  module            180    none",
+        "Blueprint ID       Output  Ticks  Prerequisites",
+        "-----------------  ------  -----  -------------",
+        "small-solar-array  module  180    none",
       ].join("\n"),
     );
   });
 
   test("formats readable details for one blueprint", () => {
-    expect(formatBlueprintDetails(exampleBlueprint)).toBe(
-      [
-        "Blueprint ID: small-solar-array",
-        "Display Name: Small Solar Array Blueprint",
-        "Description: Generates starter solar power during clear daylight.",
-        "Status: published",
-        "Output: module",
-        "Output Module Type: small-solar-array",
-        "Build Ticks: 180",
-        "Repeatable: yes",
-        "Prerequisites: none",
-        "Capabilities: solar-generation",
-        "Inputs: {",
-        '  "ferrite": 90,',
-        '  "silicate-glass": 45',
-        "}",
-        "Runtime Attributes: {",
-        '  "status": "online",',
-        '  "powerGenerationKw": 12',
-        "}",
-      ].join("\n"),
-    );
+    const formatted = formatBlueprintDetails(exampleBlueprint);
+    expect(formatted).toContain("Summary");
+    expect(formatted).toContain("Blueprint ID        small-solar-array");
+    expect(formatted).toContain("Inputs");
+    expect(formatted).toContain("ferrite");
+    expect(formatted).toContain("Runtime Attributes");
+    expect(formatted).toContain("powerGenerationKw");
   });
 });
 

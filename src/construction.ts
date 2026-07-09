@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
 import type { BlueprintRecord } from "./blueprints.js";
+import { formatTable } from "./cli-format.js";
+import { createNextLocalModuleId } from "./local-module-ids.js";
 import type { ModuleRecord } from "./modules.js";
 
 export type Inventory = Record<string, number>;
@@ -72,10 +73,6 @@ function getFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function toIdToken(value: string): string {
-  return value.replace(/[^a-zA-Z0-9]+/g, "_");
-}
-
 function getBlueprintInputs(blueprint: BlueprintRecord): Inventory {
   if (!isPlainObject(blueprint.inputs)) {
     return {};
@@ -123,10 +120,6 @@ function getBuildTicks(blueprint: BlueprintRecord): number {
 
 function createModuleDisplayName(blueprint: BlueprintRecord): string {
   return blueprint.displayName.replace(/ Blueprint$/, "");
-}
-
-function createModuleId(moduleType: string, createId: () => string): string {
-  return `local_${toIdToken(moduleType)}_${toIdToken(createId())}`;
 }
 
 export function getEffectiveInventory(state: ConstructionState): Inventory {
@@ -235,7 +228,6 @@ function validateConstructableBlueprint(blueprint: BlueprintRecord): void {
 export function previewConstruction(
   state: ConstructionState,
   blueprint: BlueprintRecord,
-  createId: () => string = randomUUID,
 ): ConstructionPreview {
   validateConstructableBlueprint(blueprint);
 
@@ -276,7 +268,7 @@ export function previewConstruction(
     );
   }
 
-  const outputModuleId = createModuleId(getOutputModuleType(blueprint), createId);
+  const outputModuleId = createNextLocalModuleId(state.modules, getOutputModuleType(blueprint));
 
   return {
     blueprintId: blueprint.blueprintId,
@@ -297,9 +289,8 @@ export function previewConstruction(
 export function startConstruction(
   state: ConstructionState,
   blueprint: BlueprintRecord,
-  createId: () => string = randomUUID,
 ): ConstructionStartResult {
-  const preview = previewConstruction(state, blueprint, createId);
+  const preview = previewConstruction(state, blueprint);
   const facility = state.modules?.find((module) => module.id === preview.facilityId);
 
   if (!facility) {
@@ -395,20 +386,8 @@ export function formatConstructionStatus(modules: ModuleRecord[]): string {
     return "No active construction jobs.";
   }
 
-  const facilityWidth = Math.max("Facility".length, 20, ...rows.map((row) => row.facility.length));
-  const blueprintWidth = Math.max("Blueprint".length, ...rows.map((row) => row.blueprintId.length));
-  const remainingWidth = Math.max("Remaining Ticks".length, ...rows.map((row) => row.remainingTicks.length));
-  const outputWidth = Math.max("Output".length, ...rows.map((row) => row.output.length));
-  const lines = [
-    `${"Facility".padEnd(facilityWidth)}  ${"Blueprint".padEnd(blueprintWidth)}  ${"Remaining Ticks".padEnd(remainingWidth)}  ${"Output".padEnd(outputWidth)}`,
-    `${"-".repeat(facilityWidth)}  ${"-".repeat(blueprintWidth)}  ${"-".repeat(remainingWidth)}  ${"-".repeat(outputWidth)}`,
-  ];
-
-  for (const row of rows) {
-    lines.push(
-      `${row.facility.padEnd(facilityWidth)}  ${row.blueprintId.padEnd(blueprintWidth)}  ${row.remainingTicks.padEnd(remainingWidth)}  ${row.output}`,
-    );
-  }
-
-  return lines.join("\n");
+  return formatTable(
+    ["Facility", "Blueprint", "Remaining Ticks", "Output"],
+    rows.map((row) => [row.facility, row.blueprintId, row.remainingTicks, row.output]),
+  );
 }

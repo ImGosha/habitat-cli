@@ -1,4 +1,6 @@
 import type { ModuleRecord } from "./modules.js";
+import type { SolarIrradiance } from "./solar.js";
+import { formatTable } from "./cli-format.js";
 
 export type SimulationState = {
   currentTick: number;
@@ -23,6 +25,21 @@ export type TickResult = {
   powerShortfallKwh: number;
   batteryId: string;
   batteryEnergyRemainingKwh: number;
+};
+
+export type SolarChargeResult = {
+  batteryId?: string;
+  generatedKwh: number;
+  batteryEnergyBeforeKwh?: number;
+  batteryEnergyAfterKwh?: number;
+  noChargeReason?: string;
+  solarModuleCount: number;
+  irradiance: SolarIrradiance;
+};
+
+export type PowerSimulationResult = TickResult & {
+  solarGeneratedKwh: number;
+  solarNoChargeReasons: string[];
 };
 
 export type ModulePowerStatus = {
@@ -73,28 +90,24 @@ export function getModulePowerStatuses(modules: ModuleRecord[] = []): ModulePowe
 
 export function formatModulePowerStatusTable(modules: ModuleRecord[] = []): string {
   const statuses = getModulePowerStatuses(modules);
-  const moduleWidth = Math.max("Module".length, ...statuses.map((status) => status.name.length));
-  const stateWidth = Math.max("State".length, ...statuses.map((status) => status.state.length));
-  const powerHeader = "Power Draw";
-  const lines = [
-    `${"Module".padEnd(moduleWidth)}  ${"State".padEnd(stateWidth)}  ${powerHeader}`,
-    `${"-".repeat(moduleWidth)}  ${"-".repeat(stateWidth)}  ${"-".repeat(powerHeader.length)}`,
-  ];
-
-  for (const status of statuses) {
-    lines.push(
-      `${status.name.padEnd(moduleWidth)}  ${status.state.padEnd(stateWidth)}  ${formatNumber(status.powerDrawKw)} kW`,
-    );
-  }
 
   const totalPowerDrawKw = calculateTotalPowerDrawKw(modules);
   const oneTickEnergyKwh = totalPowerDrawKw / 3600;
 
-  lines.push("");
-  lines.push(`Total Current Power Draw: ${formatNumber(totalPowerDrawKw)} kW`);
-  lines.push(`Energy Cost For One Tick: ${formatNumber(oneTickEnergyKwh)} kWh`);
-
-  return lines.join("\n");
+  return [
+    formatTable(
+      ["Module", "State", "Power Draw"],
+      statuses.map((status) => [status.name, status.state, `${formatNumber(status.powerDrawKw)} kW`]),
+    ),
+    "",
+    formatTable(
+      ["Metric", "Value"],
+      [
+        ["Total Current Power Draw", `${formatNumber(totalPowerDrawKw)} kW`],
+        ["Energy Cost For One Tick", `${formatNumber(oneTickEnergyKwh)} kWh`],
+      ],
+    ),
+  ].join("\n");
 }
 
 export function findPrimaryBattery(modules: ModuleRecord[] = []): ModuleRecord | undefined {
@@ -103,6 +116,36 @@ export function findPrimaryBattery(modules: ModuleRecord[] = []): ModuleRecord |
       module.capabilities.includes("power-storage") &&
       getFiniteNumber(module.runtimeAttributes.currentEnergyKwh) !== undefined,
   );
+}
+
+function hasCapability(module: ModuleRecord, capability: string): boolean {
+  return module.capabilities.includes(capability);
+}
+
+function getModuleStatus(module: ModuleRecord): string {
+  return typeof module.runtimeAttributes.status === "string" ? module.runtimeAttributes.status : "";
+}
+
+function getModuleEnergyStorageKwh(module: ModuleRecord): number | undefined {
+  return getFiniteNumber(module.runtimeAttributes.energyStorageKwh);
+}
+
+function getModulePowerGenerationKw(module: ModuleRecord): number | undefined {
+  return getFiniteNumber(module.runtimeAttributes.powerGenerationKw);
+}
+
+function findFirstOnlineBattery(modules: ModuleRecord[] = []): ModuleRecord | undefined {
+  return modules.find(
+    (module) =>
+      hasCapability(module, "power-storage") &&
+      getModuleStatus(module) === "online" &&
+      getFiniteNumber(module.runtimeAttributes.currentEnergyKwh) !== undefined &&
+      getModuleEnergyStorageKwh(module) !== undefined,
+  );
+}
+
+function findOnlineSolarModules(modules: ModuleRecord[] = []): ModuleRecord[] {
+  return modules.filter((module) => hasCapability(module, "solar-generation") && getModuleStatus(module) === "online");
 }
 
 export function applyPowerTick(state: PowerTickState, tickCount: number, now = new Date()): TickResult {
@@ -139,5 +182,125 @@ export function applyPowerTick(state: PowerTickState, tickCount: number, now = n
     powerShortfallKwh,
     batteryId: battery.id,
     batteryEnergyRemainingKwh,
+  };
+}
+
+export function applySolarCharging(
+  state: PowerTickState,
+  tickCount: number,
+  irradiance: SolarIrradiance,
+): SolarChargeResult {
+  const onlineSolarModules = findOnlineSolarModules(state.modules);
+
+  if (onlineSolarModules.length === 0) {
+    return {
+      generatedKwh: 0,
+      noChargeReason: "No online solar modules were available for charging.",
+      solarModuleCount: 0,
+      irradiance,
+    };
+  }
+
+  const battery = findFirstOnlineBattery(state.modules);
+
+  if (!battery) {
+    return {
+      generatedKwh: 0,
+      noChargeReason: "No online battery was available for solar charging.",
+      solarModuleCount: onlineSolarModules.length,
+      irradiance,
+    };
+  }
+
+  if (irradiance.wPerM2 <= 0) {
+    return {
+      generatedKwh: 0,
+      noChargeReason: "No solar charging occurred because solar irradiance was 0 W/m^2.",
+      solarModuleCount: onlineSolarModules.length,
+      irradiance,
+    };
+  }
+
+  const totalGenerationKw = onlineSolarModules.reduce((total, module) => total + (getModulePowerGenerationKw(module) ?? 0), 0);
+
+  if (totalGenerationKw <= 0) {
+    return {
+      generatedKwh: 0,
+      noChargeReason: "No online solar modules reported usable powerGenerationKw.",
+      solarModuleCount: onlineSolarModules.length,
+      irradiance,
+    };
+  }
+
+  const batteryEnergyBeforeKwh = getFiniteNumber(battery.runtimeAttributes.currentEnergyKwh) ?? 0;
+  const energyStorageKwh = getModuleEnergyStorageKwh(battery) ?? batteryEnergyBeforeKwh;
+  const generatedKwh = totalGenerationKw * (irradiance.wPerM2 / 900) * 0.5 * (tickCount / 3600);
+  const batteryEnergyAfterKwh = Math.min(energyStorageKwh, batteryEnergyBeforeKwh + generatedKwh);
+
+  battery.runtimeAttributes.currentEnergyKwh = batteryEnergyAfterKwh;
+
+  return {
+    batteryId: battery.id,
+    generatedKwh,
+    batteryEnergyBeforeKwh,
+    batteryEnergyAfterKwh,
+    solarModuleCount: onlineSolarModules.length,
+    irradiance,
+  };
+}
+
+export async function runPowerSimulation(
+  state: PowerTickState,
+  tickCount: number,
+  loadSolarIrradiance: () => Promise<SolarIrradiance>,
+  now = new Date(),
+): Promise<PowerSimulationResult> {
+  let latestResult: TickResult | undefined;
+  let totalEnergyRequestedKwh = 0;
+  let totalEnergyDrainedKwh = 0;
+  let totalPowerShortfallKwh = 0;
+  let solarGeneratedKwh = 0;
+  const solarNoChargeReasonSet = new Set<string>();
+
+  for (let currentTick = 0; currentTick < tickCount; currentTick += 1) {
+    latestResult = applyPowerTick(state, 1, now);
+    totalEnergyRequestedKwh += latestResult.energyRequestedKwh;
+    totalEnergyDrainedKwh += latestResult.energyDrainedKwh;
+    totalPowerShortfallKwh += latestResult.powerShortfallKwh;
+
+    try {
+      const irradiance = await loadSolarIrradiance();
+      const chargeResult = applySolarCharging(state, 1, irradiance);
+      solarGeneratedKwh += chargeResult.generatedKwh;
+
+      if (chargeResult.noChargeReason) {
+        solarNoChargeReasonSet.add(chargeResult.noChargeReason);
+      }
+    } catch {
+      solarNoChargeReasonSet.add(
+        "No solar charging occurred because the solar irradiance could not be retrieved.",
+      );
+    }
+  }
+
+  if (!latestResult) {
+    throw new Error("Tick count must be at least 1.");
+  }
+
+  const battery = findPrimaryBattery(state.modules);
+  const batteryEnergyRemainingKwh =
+    battery && getFiniteNumber(battery.runtimeAttributes.currentEnergyKwh) !== undefined
+      ? (getFiniteNumber(battery.runtimeAttributes.currentEnergyKwh) ?? latestResult.batteryEnergyRemainingKwh)
+      : latestResult.batteryEnergyRemainingKwh;
+
+  return {
+    ...latestResult,
+    tickCount,
+    energyRequestedKwh: totalEnergyRequestedKwh,
+    energyDrainedKwh: totalEnergyDrainedKwh,
+    powerShortfallKwh: totalPowerShortfallKwh,
+    batteryEnergyRemainingKwh,
+    solarGeneratedKwh,
+    solarNoChargeReasons: [...solarNoChargeReasonSet],
   };
 }

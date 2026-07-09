@@ -1,3 +1,5 @@
+import { formatTable } from "./cli-format.js";
+
 export type ModuleRecord = {
   id: string;
   blueprintId: string;
@@ -34,6 +36,22 @@ export function formatModuleListItem(module: ModuleRecord): string {
   return `${getShortModuleId(module)}: ${module.displayName} (${module.blueprintId}) status=${
     module.runtimeAttributes.status ?? "Unknown"
   }`;
+}
+
+export function formatModuleList(modules: ModuleRecord[]): string {
+  if (modules.length === 0) {
+    return "No modules found.";
+  }
+
+  return formatTable(
+    ["Module ID", "Display Name", "Blueprint", "Status"],
+    modules.map((module) => [
+      getShortModuleId(module),
+      module.displayName,
+      module.blueprintId,
+      String(module.runtimeAttributes.status ?? "Unknown"),
+    ]),
+  );
 }
 
 export function findModuleById(modules: ModuleRecord[] | undefined, moduleId: string): ModuleRecord | undefined {

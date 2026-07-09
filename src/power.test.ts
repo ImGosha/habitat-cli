@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { ModuleRecord } from "./modules.js";
 import {
   applyPowerTick,
+  applySolarCharging,
   calculateTotalPowerDrawKw,
   findPrimaryBattery,
   formatModulePowerStatusTable,
   getModulePowerDrawKw,
   type PowerTickState,
+  runPowerSimulation,
 } from "./power.js";
 
 function moduleRecord(overrides: Partial<ModuleRecord>): ModuleRecord {
@@ -106,8 +108,8 @@ describe("battery drain", () => {
 
     const result = applyPowerTick(state, 1800, new Date("2026-07-07T00:00:00.000Z"));
 
-    expect(result.energyRequestedKwh).toBe(1);
-    expect(result.energyDrainedKwh).toBe(1);
+    expect(result.energyRequestedKwh).toBeCloseTo(1, 10);
+    expect(result.energyDrainedKwh).toBeCloseTo(1, 10);
     expect(result.powerShortfallKwh).toBe(0);
     expect(result.currentTick).toBe(1800);
     expect(state.modules![1].runtimeAttributes.currentEnergyKwh).toBe(9);
@@ -149,6 +151,185 @@ describe("battery drain", () => {
   });
 });
 
+describe("solar charging", () => {
+  test("charges the first online battery from all online solar modules", () => {
+    const state: PowerTickState = {
+      modules: [
+        moduleRecord({
+          id: "battery_offline",
+          capabilities: ["power-storage"],
+          runtimeAttributes: {
+            status: "offline",
+            currentEnergyKwh: 5,
+            energyStorageKwh: 10,
+          },
+        }),
+        moduleRecord({
+          id: "battery_online",
+          capabilities: ["power-storage"],
+          runtimeAttributes: {
+            status: "online",
+            currentEnergyKwh: 2,
+            energyStorageKwh: 5,
+          },
+        }),
+        moduleRecord({
+          id: "solar_1",
+          capabilities: ["solar-generation"],
+          runtimeAttributes: {
+            status: "online",
+            powerGenerationKw: 12,
+          },
+        }),
+        moduleRecord({
+          id: "solar_2",
+          capabilities: ["solar-generation"],
+          runtimeAttributes: {
+            status: "online",
+            powerGenerationKw: 6,
+          },
+        }),
+        moduleRecord({
+          id: "solar_idle",
+          capabilities: ["solar-generation"],
+          runtimeAttributes: {
+            status: "idle",
+            powerGenerationKw: 50,
+          },
+        }),
+      ],
+    };
+
+    const result = applySolarCharging(state, 3600, { wPerM2: 900, condition: "clear" });
+
+    expect(result).toEqual({
+      batteryId: "battery_online",
+      generatedKwh: 9,
+      batteryEnergyBeforeKwh: 2,
+      batteryEnergyAfterKwh: 5,
+      noChargeReason: undefined,
+      solarModuleCount: 2,
+      irradiance: { wPerM2: 900, condition: "clear" },
+    });
+    expect(state.modules![1].runtimeAttributes.currentEnergyKwh).toBe(5);
+  });
+
+  test("reports why no charging occurred when no online solar modules are available", () => {
+    const state: PowerTickState = {
+      modules: [
+        moduleRecord({
+          id: "battery_online",
+          capabilities: ["power-storage"],
+          runtimeAttributes: {
+            status: "online",
+            currentEnergyKwh: 2,
+            energyStorageKwh: 5,
+          },
+        }),
+        moduleRecord({
+          id: "solar_idle",
+          capabilities: ["solar-generation"],
+          runtimeAttributes: {
+            status: "idle",
+            powerGenerationKw: 12,
+          },
+        }),
+      ],
+    };
+
+    const result = applySolarCharging(state, 60, { wPerM2: 900, condition: "clear" });
+
+    expect(result).toEqual({
+      batteryId: undefined,
+      generatedKwh: 0,
+      batteryEnergyBeforeKwh: undefined,
+      batteryEnergyAfterKwh: undefined,
+      noChargeReason: "No online solar modules were available for charging.",
+      solarModuleCount: 0,
+      irradiance: { wPerM2: 900, condition: "clear" },
+    });
+    expect(state.modules![0].runtimeAttributes.currentEnergyKwh).toBe(2);
+  });
+
+  test("reports why no charging occurred when the battery is not online", () => {
+    const state: PowerTickState = {
+      modules: [
+        moduleRecord({
+          id: "battery_idle",
+          capabilities: ["power-storage"],
+          runtimeAttributes: {
+            status: "idle",
+            currentEnergyKwh: 2,
+            energyStorageKwh: 5,
+          },
+        }),
+        moduleRecord({
+          id: "solar_online",
+          capabilities: ["solar-generation"],
+          runtimeAttributes: {
+            status: "online",
+            powerGenerationKw: 12,
+          },
+        }),
+      ],
+    };
+
+    const result = applySolarCharging(state, 60, { wPerM2: 900, condition: "clear" });
+
+    expect(result).toEqual({
+      batteryId: undefined,
+      generatedKwh: 0,
+      batteryEnergyBeforeKwh: undefined,
+      batteryEnergyAfterKwh: undefined,
+      noChargeReason: "No online battery was available for solar charging.",
+      solarModuleCount: 1,
+      irradiance: { wPerM2: 900, condition: "clear" },
+    });
+  });
+
+  test("continues the tick simulation when solar irradiance cannot be retrieved", async () => {
+    const state: PowerTickState = {
+      modules: [
+        moduleRecord({ runtimeAttributes: { powerDrawKw: 2 } }),
+        moduleRecord({
+          id: "battery_1",
+          capabilities: ["power-storage"],
+          runtimeAttributes: {
+            status: "active",
+            currentEnergyKwh: 10,
+            powerDrawKw: 0,
+          },
+        }),
+        moduleRecord({
+          id: "solar_1",
+          capabilities: ["solar-generation"],
+          runtimeAttributes: {
+            status: "online",
+            powerGenerationKw: 12,
+          },
+        }),
+      ],
+    };
+
+    const result = await runPowerSimulation(
+      state,
+      1800,
+      async () => {
+        throw new Error("network down");
+      },
+      new Date("2026-07-07T00:00:00.000Z"),
+    );
+
+    expect(result.energyRequestedKwh).toBeCloseTo(1, 10);
+    expect(result.energyDrainedKwh).toBeCloseTo(1, 10);
+    expect(result.solarGeneratedKwh).toBe(0);
+    expect(result.solarNoChargeReasons).toEqual([
+      "No solar charging occurred because the solar irradiance could not be retrieved.",
+    ]);
+    expect(state.modules![1].runtimeAttributes.currentEnergyKwh).toBeCloseTo(9, 10);
+  });
+});
+
 describe("module power status table", () => {
   test("formats module state, current power draw, total draw, and one-tick energy cost", () => {
     const modules = [
@@ -181,8 +362,10 @@ describe("module power status table", () => {
         "Command Module  active  2 kW",
         "Workshop        idle    3 kW",
         "",
-        "Total Current Power Draw: 5 kW",
-        "Energy Cost For One Tick: 0.001389 kWh",
+        "Metric                    Value",
+        "------------------------  ------------",
+        "Total Current Power Draw  5 kW",
+        "Energy Cost For One Tick  0.001389 kWh",
       ].join("\n"),
     );
   });
