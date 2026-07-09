@@ -9,6 +9,7 @@ export type ConstructionJob = {
   displayName: string;
   outputItemType: string;
   outputModuleType: string;
+  outputModuleId: string;
   totalTicks: number;
   remainingTicks: number;
   startedAtTick: number;
@@ -29,7 +30,13 @@ export type ConstructionPreview = {
   blueprintId: string;
   facilityId: string;
   facilityDisplayName: string;
+  outputModuleId: string;
   totalTicks: number;
+  requiredFacilityExists: boolean;
+  facilityAvailable: boolean;
+  supplyCacheOnline: boolean;
+  prerequisitesMet: boolean;
+  canStart: boolean;
   missingResources: Inventory;
   inventoryAfter: Inventory;
 };
@@ -37,6 +44,7 @@ export type ConstructionPreview = {
 export type ConstructionStartResult = {
   blueprintId: string;
   facilityId: string;
+  outputModuleId: string;
   remainingTicks: number;
 };
 
@@ -89,6 +97,12 @@ function getBlueprintInputs(blueprint: BlueprintRecord): Inventory {
 function getRequiredFacilityModuleType(blueprint: BlueprintRecord): string {
   const requiredFacility = isPlainObject(blueprint.requiredFacility) ? blueprint.requiredFacility : undefined;
   return typeof requiredFacility?.moduleType === "string" ? requiredFacility.moduleType : "workshop-fabricator";
+}
+
+function getBlueprintPrerequisites(blueprint: BlueprintRecord): string[] {
+  return Array.isArray(blueprint.prerequisites)
+    ? blueprint.prerequisites.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+    : [];
 }
 
 function getOutputItemType(blueprint: BlueprintRecord): string {
@@ -144,6 +158,26 @@ export function findAvailableConstructionFacility(
   });
 }
 
+function hasRequiredFacility(state: ConstructionState, blueprint: BlueprintRecord): boolean {
+  const requiredModuleType = getRequiredFacilityModuleType(blueprint);
+  return state.modules?.some((module) => module.blueprintId === requiredModuleType) ?? false;
+}
+
+function isSupplyCacheOnline(state: ConstructionState): boolean {
+  return (
+    state.modules?.some(
+      (module) =>
+        module.blueprintId === "supply-cache" &&
+        (module.runtimeAttributes.status === "online" || module.runtimeAttributes.status === "active"),
+    ) ?? false
+  );
+}
+
+function getMissingPrerequisites(state: ConstructionState, blueprint: BlueprintRecord): string[] {
+  const ownedBlueprintIds = new Set((state.modules ?? []).map((module) => module.blueprintId));
+  return getBlueprintPrerequisites(blueprint).filter((blueprintId) => !ownedBlueprintIds.has(blueprintId));
+}
+
 function createMissingResources(inputs: Inventory, inventory: Inventory): Inventory {
   const missing: Inventory = {};
 
@@ -168,12 +202,17 @@ function createInventoryAfter(inputs: Inventory, inventory: Inventory): Inventor
   return inventoryAfter;
 }
 
-function createConstructionJob(state: ConstructionState, blueprint: BlueprintRecord): ConstructionJob {
+function createConstructionJob(
+  state: ConstructionState,
+  blueprint: BlueprintRecord,
+  outputModuleId: string,
+): ConstructionJob {
   return {
     blueprintId: blueprint.blueprintId,
     displayName: blueprint.displayName,
     outputItemType: getOutputItemType(blueprint),
     outputModuleType: getOutputModuleType(blueprint),
+    outputModuleId,
     totalTicks: getBuildTicks(blueprint),
     remainingTicks: getBuildTicks(blueprint),
     startedAtTick: getFiniteNumber(state.simulation?.currentTick) ?? 0,
@@ -193,10 +232,33 @@ function validateConstructableBlueprint(blueprint: BlueprintRecord): void {
   }
 }
 
-export function previewConstruction(state: ConstructionState, blueprint: BlueprintRecord): ConstructionPreview {
+export function previewConstruction(
+  state: ConstructionState,
+  blueprint: BlueprintRecord,
+  createId: () => string = randomUUID,
+): ConstructionPreview {
   validateConstructableBlueprint(blueprint);
 
+  const requiredFacilityExists = hasRequiredFacility(state, blueprint);
   const facility = findAvailableConstructionFacility(state, blueprint);
+  const facilityAvailable = facility !== undefined;
+  const supplyCacheOnline = isSupplyCacheOnline(state);
+  const missingPrerequisites = getMissingPrerequisites(state, blueprint);
+  const prerequisitesMet = missingPrerequisites.length === 0;
+
+  if (!requiredFacilityExists) {
+    throw new Error(`Required facility "${getRequiredFacilityModuleType(blueprint)}" does not exist.`);
+  }
+
+  if (!supplyCacheOnline) {
+    throw new Error(`Supply cache must be online before starting "${blueprint.blueprintId}".`);
+  }
+
+  if (!prerequisitesMet) {
+    throw new Error(
+      `Prerequisites are not met for "${blueprint.blueprintId}". Missing: ${missingPrerequisites.join(", ")}.`,
+    );
+  }
 
   if (!facility) {
     throw new Error(`No idle ${getRequiredFacilityModuleType(blueprint)} facility is available.`);
@@ -214,18 +276,30 @@ export function previewConstruction(state: ConstructionState, blueprint: Bluepri
     );
   }
 
+  const outputModuleId = createModuleId(getOutputModuleType(blueprint), createId);
+
   return {
     blueprintId: blueprint.blueprintId,
     facilityId: facility.id,
     facilityDisplayName: facility.displayName,
+    outputModuleId,
     totalTicks: getBuildTicks(blueprint),
+    requiredFacilityExists,
+    facilityAvailable,
+    supplyCacheOnline,
+    prerequisitesMet,
+    canStart: true,
     missingResources,
     inventoryAfter: createInventoryAfter(inputs, inventory),
   };
 }
 
-export function startConstruction(state: ConstructionState, blueprint: BlueprintRecord): ConstructionStartResult {
-  const preview = previewConstruction(state, blueprint);
+export function startConstruction(
+  state: ConstructionState,
+  blueprint: BlueprintRecord,
+  createId: () => string = randomUUID,
+): ConstructionStartResult {
+  const preview = previewConstruction(state, blueprint, createId);
   const facility = state.modules?.find((module) => module.id === preview.facilityId);
 
   if (!facility) {
@@ -234,11 +308,12 @@ export function startConstruction(state: ConstructionState, blueprint: Blueprint
 
   state.inventory = preview.inventoryAfter;
   facility.runtimeAttributes.status = "active";
-  facility.runtimeAttributes.constructionJob = createConstructionJob(state, blueprint);
+  facility.runtimeAttributes.constructionJob = createConstructionJob(state, blueprint, preview.outputModuleId);
 
   return {
     blueprintId: blueprint.blueprintId,
     facilityId: facility.id,
+    outputModuleId: preview.outputModuleId,
     remainingTicks: getBuildTicks(blueprint),
   };
 }
@@ -261,7 +336,7 @@ export function cancelConstruction(state: ConstructionState, facility: ModuleRec
 export function advanceConstructionJobs(
   state: ConstructionState,
   tickCount: number,
-  createId: () => string = randomUUID,
+  _createId?: () => string,
 ): ConstructionAdvanceResult {
   const completedModules: ModuleRecord[] = [];
 
@@ -280,7 +355,7 @@ export function advanceConstructionJobs(
     }
 
     const completedModule: ModuleRecord = {
-      id: createModuleId(job.outputModuleType, createId),
+      id: job.outputModuleId,
       blueprintId: job.outputModuleType,
       displayName: createModuleDisplayName({
         blueprintId: job.blueprintId,

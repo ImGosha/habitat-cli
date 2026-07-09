@@ -460,7 +460,15 @@ async function constructBlueprint(blueprintId: string, options: ConstructOptions
     if (options.dryRun) {
       console.log(`Construction dry run for "${blueprint.blueprintId}".`);
       console.log(`Facility: ${preview.facilityDisplayName} (${preview.facilityId})`);
+      console.log(`Output Module ID: ${preview.outputModuleId}`);
       console.log(`Build Ticks: ${preview.totalTicks}`);
+      console.log("Checks:");
+      console.log(`  required facility exists: ${preview.requiredFacilityExists ? "yes" : "no"}`);
+      console.log(`  fabricator available: ${preview.facilityAvailable ? "yes" : "no"}`);
+      console.log(`  supply cache online: ${preview.supplyCacheOnline ? "yes" : "no"}`);
+      console.log(`  prerequisites met: ${preview.prerequisitesMet ? "yes" : "no"}`);
+      console.log(`  enough local inventory: ${Object.keys(preview.missingResources).length === 0 ? "yes" : "no"}`);
+      console.log(`  construction can start: ${preview.canStart ? "yes" : "no"}`);
       console.log("Materials Required:");
 
       for (const line of formatInventoryLines(requiredInventory)) {
@@ -482,6 +490,7 @@ async function constructBlueprint(blueprintId: string, options: ConstructOptions
 
     console.log(`Started construction for "${blueprint.blueprintId}".`);
     console.log(`Facility: ${preview.facilityDisplayName} (${startedJob.facilityId})`);
+    console.log(`Output Module ID: ${startedJob.outputModuleId}`);
     console.log(`Remaining Ticks: ${startedJob.remainingTicks}`);
     console.log("Inventory After:");
 
