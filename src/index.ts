@@ -3,7 +3,6 @@
 import { Command, CommanderError } from "commander";
 import dotenv from "dotenv";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import {
@@ -33,6 +32,8 @@ import {
 } from "./cli-format.js";
 import { addInventoryResource, formatInventoryList } from "./inventory.js";
 import { createNextLocalModuleId } from "./local-module-ids.js";
+import { type HabitatRegistrationRecord, type LocalState, cloneModule } from "./local-state.js";
+import { SqliteLocalStateStore } from "./local-state-storage.js";
 import { fetchResourceCatalog, formatResourceList } from "./resources.js";
 import { fetchSolarIrradiance, formatSolarStatus } from "./solar.js";
 import {
@@ -45,33 +46,6 @@ import {
   type ModuleRecord,
 } from "./modules.js";
 import { formatModulePowerStatusTable, getModulePowerDrawKw, runPowerSimulation } from "./power.js";
-
-type HabitatRegistrationRecord = {
-  baseUrl: string;
-  displayName: string;
-  habitatUuid: string;
-  habitatId: string;
-  habitatSlug?: string;
-  status?: string;
-  catalogVersion?: string;
-  lastSeenAt?: string | null;
-  starterModules: ModuleRecord[];
-  blueprints: BlueprintRecord[];
-};
-
-type LocalState = {
-  kepler?: HabitatRegistrationRecord;
-  inventory?: Record<string, number>;
-  modules?: ModuleRecord[];
-  simulation?: {
-    currentTick?: number;
-    lastTickAt?: string;
-    lastPowerDrawKw?: number;
-    lastEnergyRequestedKwh?: number;
-    lastEnergyDrainedKwh?: number;
-    lastPowerShortfallKwh?: number;
-  };
-} & Record<string, unknown>;
 
 type RegisterOptions = {
   name: string;
@@ -137,7 +111,8 @@ function findProjectRootPath(): string {
 
 const projectRootPath = findProjectRootPath();
 dotenv.config({ path: join(projectRootPath, ".env"), quiet: true });
-const dataFilePath = join(projectRootPath, "habitat.json");
+const dataFilePath = join(projectRootPath, "habitat.sqlite");
+const localStateStore = new SqliteLocalStateStore(dataFilePath);
 
 function exampleBlock(lines: string[]): string {
   return `\n${formatExamples(lines)}\n`;
@@ -169,26 +144,6 @@ function getKeplerHeaders(): HeadersInit {
   };
 }
 
-function cloneModule(module: ModuleRecord): ModuleRecord {
-  return {
-    ...module,
-    connectedTo: [...module.connectedTo],
-    runtimeAttributes: { ...module.runtimeAttributes },
-    capabilities: [...module.capabilities],
-  };
-}
-
-function normalizeState(state: LocalState): LocalState {
-  if (!Array.isArray(state.modules) && state.kepler?.starterModules) {
-    return {
-      ...state,
-      modules: state.kepler.starterModules.map(cloneModule),
-    };
-  }
-
-  return state;
-}
-
 async function keplerRequest(path: string, init: RequestInit): Promise<Response> {
   const response = await fetch(`${getKeplerBaseUrl()}${path}`, init);
 
@@ -202,22 +157,8 @@ async function keplerRequest(path: string, init: RequestInit): Promise<Response>
   process.exit(1);
 }
 
-async function ensureDataDir(): Promise<void> {
-  await mkdir(dirname(dataFilePath), { recursive: true });
-}
-
 async function readState(): Promise<LocalState> {
-  try {
-    const raw = await readFile(dataFilePath, "utf8");
-    const parsed = JSON.parse(raw) as LocalState;
-    return typeof parsed === "object" && parsed !== null ? normalizeState(parsed) : {};
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return {};
-    }
-
-    throw error;
-  }
+  return localStateStore.readState();
 }
 
 async function readAndPersistState(): Promise<LocalState> {
@@ -227,25 +168,11 @@ async function readAndPersistState(): Promise<LocalState> {
 }
 
 async function writeState(state: LocalState): Promise<void> {
-  await ensureDataDir();
-  await writeFile(dataFilePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  localStateStore.writeState(state);
 }
 
 async function deleteDataFileIfEmpty(state: LocalState): Promise<void> {
-  const meaningfulKeys = Object.keys(state).filter((key) => state[key] !== undefined);
-
-  if (meaningfulKeys.length > 0) {
-    await writeState(state);
-    return;
-  }
-
-  try {
-    await rm(dataFilePath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  }
+  localStateStore.deleteStateIfEmpty(state);
 }
 
 function formatRegistrationStatus(registration: HabitatRegistrationRecord, moduleCount: number): string {

@@ -1,3 +1,5 @@
 node_modules/
 .env
+habitat.json
+habitat.sqlite
 lab-submission-notes.md
