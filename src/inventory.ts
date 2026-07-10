@@ -12,6 +12,8 @@ export type InventoryAddResult = {
   newAmount: number;
 };
 
+export type InventoryRemoveResult = InventoryAddResult;
+
 function formatAmount(value: number): string {
   return Number(value.toFixed(6)).toString();
 }
@@ -29,6 +31,25 @@ export function addInventoryResource(
   const inventory = { ...(state.inventory ?? {}) };
   const previousAmount = getInventoryAmount(inventory, resourceId);
   const newAmount = previousAmount + amount;
+
+  inventory[resourceId] = newAmount;
+  state.inventory = inventory;
+
+  return {
+    resourceId,
+    previousAmount,
+    newAmount,
+  };
+}
+
+export function removeInventoryResource(
+  state: InventoryState,
+  resourceId: string,
+  amount: number,
+): InventoryRemoveResult {
+  const inventory = { ...(state.inventory ?? {}) };
+  const previousAmount = getInventoryAmount(inventory, resourceId);
+  const newAmount = Math.max(0, previousAmount - amount);
 
   inventory[resourceId] = newAmount;
   state.inventory = inventory;

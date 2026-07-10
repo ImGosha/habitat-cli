@@ -3,6 +3,7 @@ import {
   addInventoryResource,
   formatInventoryList,
   getInventoryAmount,
+  removeInventoryResource,
   type InventoryState,
 } from "./inventory.js";
 
@@ -63,5 +64,41 @@ describe("inventory add", () => {
       newAmount: 30,
     });
     expect(getInventoryAmount(state.inventory ?? {}, "conductive-ore")).toBe(30);
+  });
+});
+
+describe("inventory remove", () => {
+  test("decreases an existing resource quantity", () => {
+    const state: InventoryState = {
+      inventory: {
+        ferrite: 30,
+      },
+    };
+
+    const result = removeInventoryResource(state, "ferrite", 12);
+
+    expect(result).toEqual({
+      resourceId: "ferrite",
+      previousAmount: 30,
+      newAmount: 18,
+    });
+    expect(getInventoryAmount(state.inventory ?? {}, "ferrite")).toBe(18);
+  });
+
+  test("clamps inventory removal at zero", () => {
+    const state: InventoryState = {
+      inventory: {
+        water: 5,
+      },
+    };
+
+    const result = removeInventoryResource(state, "water", 99);
+
+    expect(result).toEqual({
+      resourceId: "water",
+      previousAmount: 5,
+      newAmount: 0,
+    });
+    expect(getInventoryAmount(state.inventory ?? {}, "water")).toBe(0);
   });
 });

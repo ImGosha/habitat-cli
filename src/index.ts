@@ -3,20 +3,12 @@
 import { Command, CommanderError } from "commander";
 import dotenv from "dotenv";
 import { existsSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import {
-  fetchBlueprintCatalog,
-  fetchBlueprintDetails,
-  formatBlueprintDetails,
-  formatBlueprintList,
-  type BlueprintRecord,
-} from "./blueprints.js";
+import { formatBlueprintDetails, formatBlueprintList, type BlueprintRecord } from "./blueprints.js";
 import {
   advanceConstructionJobs,
   cancelConstruction,
   formatConstructionStatus,
-  getEffectiveInventory,
   previewConstruction,
   startConstruction,
 } from "./construction.js";
@@ -30,12 +22,11 @@ import {
   formatTable,
   formatUnknownValue,
 } from "./cli-format.js";
-import { addInventoryResource, formatInventoryList } from "./inventory.js";
-import { createNextLocalModuleId } from "./local-module-ids.js";
-import { type HabitatRegistrationRecord, type LocalState, cloneModule } from "./local-state.js";
-import { SqliteLocalStateStore } from "./local-state-storage.js";
-import { fetchResourceCatalog, formatResourceList } from "./resources.js";
-import { fetchSolarIrradiance, formatSolarStatus } from "./solar.js";
+import { HabitatApiClient } from "./habitat-api-client.js";
+import { formatInventoryList } from "./inventory.js";
+import { type HabitatRegistrationRecord, type LocalState } from "./local-state.js";
+import { formatResourceList } from "./resources.js";
+import { formatSolarStatus } from "./solar.js";
 import {
   findModuleById,
   formatModuleList,
@@ -49,28 +40,6 @@ import { formatModulePowerStatusTable, getModulePowerDrawKw, runPowerSimulation 
 
 type RegisterOptions = {
   name: string;
-};
-
-type KeplerRegistrationRequest = {
-  displayName: string;
-  habitatUuid: string;
-};
-
-type KeplerRegistrationResponse = {
-  habitatId: string;
-  starterModules: ModuleRecord[];
-  blueprints: BlueprintRecord[];
-};
-
-type KeplerHabitatResponse = {
-  habitat: {
-    id: string;
-    habitatSlug: string;
-    displayName: string;
-    catalogVersion: string;
-    status: string;
-    lastSeenAt?: string | null;
-  };
 };
 
 type ModuleCreateOptions = {
@@ -111,8 +80,7 @@ function findProjectRootPath(): string {
 
 const projectRootPath = findProjectRootPath();
 dotenv.config({ path: join(projectRootPath, ".env"), quiet: true });
-const dataFilePath = join(projectRootPath, "habitat.sqlite");
-const localStateStore = new SqliteLocalStateStore(dataFilePath);
+const habitatApiClient = new HabitatApiClient();
 
 function exampleBlock(lines: string[]): string {
   return `\n${formatExamples(lines)}\n`;
@@ -158,24 +126,32 @@ async function keplerRequest(path: string, init: RequestInit): Promise<Response>
 }
 
 async function readState(): Promise<LocalState> {
-  return localStateStore.readState();
+  const response = await habitatApiClient.getLocalState();
+  return response.state;
 }
 
 async function readAndPersistState(): Promise<LocalState> {
-  const state = await readState();
-  await writeState(state);
-  return state;
+  return readState();
 }
 
 async function writeState(state: LocalState): Promise<void> {
-  localStateStore.writeState(state);
+  await habitatApiClient.saveLocalState(state);
 }
 
 async function deleteDataFileIfEmpty(state: LocalState): Promise<void> {
-  localStateStore.deleteStateIfEmpty(state);
+  await habitatApiClient.saveLocalState(state);
 }
 
-function formatRegistrationStatus(registration: HabitatRegistrationRecord, moduleCount: number): string {
+function formatRegistrationStatus(
+  registration: Pick<
+    HabitatRegistrationRecord,
+    "displayName" | "habitatUuid" | "habitatId" | "baseUrl" | "habitatSlug" | "status" | "catalogVersion" | "lastSeenAt"
+  > & {
+    starterModuleCount: number;
+    blueprintCount: number;
+    localModuleCount: number;
+  },
+): string {
   return formatSection(
     "Habitat Registration",
     formatKeyValueRows([
@@ -187,9 +163,9 @@ function formatRegistrationStatus(registration: HabitatRegistrationRecord, modul
       ["Status", registration.status ?? "Unknown"],
       ["Catalog Version", registration.catalogVersion ?? "Unknown"],
       ["Last Seen At", registration.lastSeenAt ?? "Unknown"],
-      ["Starter Modules", String(registration.starterModules.length)],
-      ["Blueprints", String(registration.blueprints.length)],
-      ["Local Modules", String(moduleCount)],
+      ["Starter Modules", String(registration.starterModuleCount)],
+      ["Blueprints", String(registration.blueprintCount)],
+      ["Local Modules", String(registration.localModuleCount)],
     ]),
   );
 }
@@ -266,111 +242,65 @@ function parseTickCount(count: string): number {
 }
 
 async function registerHabitat(options: RegisterOptions): Promise<void> {
-  const state = await readState();
-
-  if (state.kepler) {
-    console.error(`This CLI is already registered with Kepler as "${state.kepler.displayName}".`);
+  try {
+    const response = await habitatApiClient.registerHabitat(options.name);
+    console.log(
+      formatResultSummary("Registration Complete", [
+        ["Display Name", response.registration.displayName],
+        ["Habitat ID", response.registration.habitatId],
+        ["Starter Modules", String(response.registration.starterModules)],
+        ["Blueprints", String(response.registration.blueprints)],
+      ]),
+    );
+  } catch (error) {
+    console.error((error as Error).message);
     process.exit(1);
   }
-
-  const requestBody: KeplerRegistrationRequest = {
-    displayName: options.name,
-    habitatUuid: randomUUID(),
-  };
-
-  const response = await keplerRequest("/habitats/register", {
-    method: "POST",
-    headers: getKeplerHeaders(),
-    body: JSON.stringify(requestBody),
-  });
-
-  const registration = (await response.json()) as KeplerRegistrationResponse;
-
-  state.kepler = {
-    baseUrl: getKeplerBaseUrl(),
-    displayName: requestBody.displayName,
-    habitatUuid: requestBody.habitatUuid,
-    habitatId: registration.habitatId,
-    starterModules: registration.starterModules,
-    blueprints: registration.blueprints,
-  };
-  state.inventory = getEffectiveInventory(state);
-  state.modules = registration.starterModules.map(cloneModule);
-
-  await writeState(state);
-  console.log(
-    formatResultSummary("Registration Complete", [
-      ["Display Name", requestBody.displayName],
-      ["Habitat ID", registration.habitatId],
-      ["Starter Modules", String(registration.starterModules.length)],
-      ["Blueprints", String(registration.blueprints.length)],
-    ]),
-  );
 }
 
 async function showHabitatRegistrationStatus(): Promise<void> {
-  const state = await readAndPersistState();
-
-  if (!state.kepler) {
-    console.error("This CLI has not been registered with Kepler yet.");
+  try {
+    const response = await habitatApiClient.getStatus();
+    const registration = {
+      displayName: response.registration.displayName,
+      habitatUuid: response.registration.habitatUuid,
+      habitatId: response.registration.habitatId,
+      baseUrl: response.registration.baseUrl,
+      habitatSlug: response.registration.habitatSlug,
+      status: response.registration.status,
+      catalogVersion: response.registration.catalogVersion,
+      lastSeenAt: response.registration.lastSeenAt,
+      starterModuleCount: response.registration.starterModules,
+      blueprintCount: response.registration.blueprints,
+      localModuleCount: response.registration.localModules,
+    };
+    console.log(formatRegistrationStatus(registration));
+  } catch (error) {
+    console.error((error as Error).message);
     process.exit(1);
   }
-
-  const response = await keplerRequest(`/habitats/${state.kepler.habitatId}/registration`, {
-    method: "GET",
-    headers: getKeplerHeaders(),
-  });
-
-  const registrationResponse = (await response.json()) as KeplerHabitatResponse;
-  const remoteHabitat = registrationResponse.habitat;
-
-  state.kepler = {
-    ...state.kepler,
-    displayName: remoteHabitat.displayName,
-    habitatId: remoteHabitat.id,
-    habitatSlug: remoteHabitat.habitatSlug,
-    status: remoteHabitat.status,
-    catalogVersion: remoteHabitat.catalogVersion,
-    lastSeenAt: remoteHabitat.lastSeenAt ?? null,
-  };
-
-  await writeState(state);
-  console.log(formatRegistrationStatus(state.kepler, state.modules?.length ?? 0));
 }
 
 async function unregisterHabitat(): Promise<void> {
-  const state = await readState();
-
-  if (!state.kepler) {
-    console.error("This CLI has not been registered with Kepler yet.");
+  try {
+    const response = await habitatApiClient.unregisterHabitat();
+    console.log(
+      formatResultSummary("Unregistration Complete", [
+        ["Display Name", response.registration.displayName],
+        ["Status", response.registration.status],
+      ]),
+    );
+  } catch (error) {
+    console.error((error as Error).message);
     process.exit(1);
   }
-
-  await keplerRequest(`/habitats/${state.kepler.habitatId}`, {
-    method: "DELETE",
-    headers: getKeplerHeaders(),
-  });
-
-  const deletedDisplayName = state.kepler.displayName;
-  delete state.kepler;
-  await deleteDataFileIfEmpty(state);
-
-  console.log(
-    formatResultSummary("Unregistration Complete", [
-      ["Display Name", deletedDisplayName],
-      ["Status", "Removed from Kepler"],
-    ]),
-  );
 }
 
 async function listBlueprints(): Promise<void> {
   try {
-    const blueprints = await fetchBlueprintCatalog({
-      baseUrl: getKeplerBaseUrl(),
-      headers: getKeplerHeaders(),
-    });
+    const response = await habitatApiClient.listBlueprints();
 
-    console.log(formatBlueprintList(blueprints));
+    console.log(formatBlueprintList(response.blueprints));
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -379,13 +309,9 @@ async function listBlueprints(): Promise<void> {
 
 async function showBlueprint(blueprintId: string): Promise<void> {
   try {
-    const blueprint = await fetchBlueprintDetails({
-      baseUrl: getKeplerBaseUrl(),
-      headers: getKeplerHeaders(),
-      blueprintId,
-    });
+    const response = await habitatApiClient.showBlueprint(blueprintId);
 
-    console.log(formatBlueprintDetails(blueprint));
+    console.log(formatBlueprintDetails(response.blueprint));
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -394,10 +320,7 @@ async function showBlueprint(blueprintId: string): Promise<void> {
 
 async function listResources(): Promise<void> {
   try {
-    const resources = await fetchResourceCatalog({
-      baseUrl: getKeplerBaseUrl(),
-      headers: getKeplerHeaders(),
-    });
+    const response = await habitatApiClient.listResources();
 
     console.log(
       [
@@ -409,7 +332,7 @@ async function listResources(): Promise<void> {
             "Blueprint requirements will refer to these resource names later.",
           ]),
         ),
-        formatResourceList(resources),
+        formatResourceList(response.resources),
       ].join("\n\n"),
     );
   } catch (error) {
@@ -420,12 +343,9 @@ async function listResources(): Promise<void> {
 
 async function showSolarStatus(): Promise<void> {
   try {
-    const irradiance = await fetchSolarIrradiance({
-      baseUrl: getKeplerBaseUrl(),
-      headers: getKeplerHeaders(),
-    });
+    const response = await habitatApiClient.getSolarIrradiance();
 
-    console.log(formatSolarStatus(irradiance));
+    console.log(formatSolarStatus(response.solarIrradiance));
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -433,14 +353,9 @@ async function showSolarStatus(): Promise<void> {
 }
 
 async function constructBlueprint(blueprintId: string, options: ConstructOptions): Promise<void> {
-  const state = await readState();
-
   try {
-    const blueprint = await fetchBlueprintDetails({
-      baseUrl: getKeplerBaseUrl(),
-      headers: getKeplerHeaders(),
-      blueprintId,
-    });
+    const state = await readState();
+    const blueprint = (await habitatApiClient.showBlueprint(blueprintId)).blueprint;
     const preview = previewConstruction(state, blueprint);
     const requiredInventory = getBlueprintInputInventory(blueprint);
 
@@ -499,20 +414,25 @@ async function constructBlueprint(blueprintId: string, options: ConstructOptions
 }
 
 async function showConstructionStatus(): Promise<void> {
-  const state = await readState();
-  console.log(formatConstructionStatus(state.modules ?? []));
+  try {
+    const state = await readState();
+    console.log(formatConstructionStatus(state.modules ?? []));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
 }
 
 async function cancelConstructionCommand(facilityModuleId: string): Promise<void> {
-  const state = await readState();
-  const facility = findModuleById(state.modules, facilityModuleId);
-
-  if (!facility) {
-    console.error(`Module "${facilityModuleId}" was not found.`);
-    process.exit(1);
-  }
-
   try {
+    const state = await readState();
+    const facility = findModuleById(state.modules, facilityModuleId);
+
+    if (!facility) {
+      console.error(`Module "${facilityModuleId}" was not found.`);
+      process.exit(1);
+    }
+
     const result = cancelConstruction(state, facility);
     await writeState(state);
     console.log(
@@ -529,8 +449,13 @@ async function cancelConstructionCommand(facilityModuleId: string): Promise<void
 }
 
 async function listInventory(): Promise<void> {
-  const state = await readState();
-  console.log(formatInventoryList(state.inventory ?? {}));
+  try {
+    const response = await habitatApiClient.listInventory();
+    console.log(formatInventoryList(response.inventory));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
 }
 
 async function addInventory(resourceId: string, amount: string): Promise<void> {
@@ -541,41 +466,74 @@ async function addInventory(resourceId: string, amount: string): Promise<void> {
     process.exit(1);
   }
 
-  const state = await readState();
-  const result = addInventoryResource(state, resourceId, numericAmount);
-  await writeState(state);
-
-  console.log(
-    formatResultSummary("Inventory Updated", [
-      ["Resource", resourceId],
-      ["Added", formatEnergy(numericAmount)],
-      ["Previous Amount", formatEnergy(result.previousAmount)],
-      ["New Amount", formatEnergy(result.newAmount)],
-    ]),
-  );
+  try {
+    const result = await habitatApiClient.changeInventory(resourceId, numericAmount);
+    console.log(
+      formatResultSummary("Inventory Updated", [
+        ["Resource", resourceId],
+        ["Added", formatEnergy(numericAmount)],
+        ["Previous Amount", formatEnergy(result.previousAmount)],
+        ["New Amount", formatEnergy(result.newAmount)],
+      ]),
+    );
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
 }
 
-async function listModules(): Promise<void> {
-  const state = await readAndPersistState();
-  const modules = state.modules ?? [];
-  console.log(formatModuleList(modules));
-}
+async function removeInventory(resourceId: string, amount: string): Promise<void> {
+  const numericAmount = Number(amount);
 
-async function showModulePowerStatus(): Promise<void> {
-  const state = await readAndPersistState();
-  console.log(formatModulePowerStatusTable(state.modules ?? []));
-}
-
-async function showModule(moduleId: string): Promise<void> {
-  const state = await readAndPersistState();
-  const module = findModuleById(state.modules, moduleId);
-
-  if (!module) {
-    console.error(`Module "${moduleId}" was not found.`);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    console.error("amount must be a positive number.");
     process.exit(1);
   }
 
-  console.log(formatModuleDetails(module));
+  try {
+    const result = await habitatApiClient.changeInventory(resourceId, -numericAmount);
+    console.log(
+      formatResultSummary("Inventory Updated", [
+        ["Resource", resourceId],
+        ["Removed", formatEnergy(numericAmount)],
+        ["Previous Amount", formatEnergy(result.previousAmount)],
+        ["New Amount", formatEnergy(result.newAmount)],
+      ]),
+    );
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function listModules(): Promise<void> {
+  try {
+    const response = await habitatApiClient.listModules();
+    console.log(formatModuleList(response.modules));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function showModulePowerStatus(): Promise<void> {
+  try {
+    const response = await habitatApiClient.listModules();
+    console.log(formatModulePowerStatusTable(response.modules));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function showModule(moduleId: string): Promise<void> {
+  try {
+    const response = await habitatApiClient.showModule(moduleId);
+    console.log(formatModuleDetails(response.module));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
 }
 
 async function setModuleStatus(moduleId: string, status: string): Promise<void> {
@@ -584,77 +542,49 @@ async function setModuleStatus(moduleId: string, status: string): Promise<void> 
     process.exit(1);
   }
 
-  const state = await readAndPersistState();
-  const module = findModuleById(state.modules, moduleId);
-
-  if (!module) {
-    console.error(`Module "${moduleId}" was not found.`);
+  try {
+    const response = await habitatApiClient.updateModule(moduleId, { status });
+    const module = response.module;
+    console.log(
+      formatResultSummary("Module Status Updated", [
+        ["Module ID", getShortModuleId(module)],
+        ["Status", status],
+        ["Current Power Draw", `${formatEnergy(getModulePowerDrawKw(module))} kW`],
+      ]),
+    );
+  } catch (error) {
+    console.error((error as Error).message);
     process.exit(1);
   }
-
-  setModuleRuntimeStatus(module, status);
-  await writeState(state);
-
-  console.log(
-    formatResultSummary("Module Status Updated", [
-      ["Module ID", getShortModuleId(module)],
-      ["Status", status],
-      ["Current Power Draw", `${formatEnergy(getModulePowerDrawKw(module))} kW`],
-    ]),
-  );
 }
 
 async function createModule(options: ModuleCreateOptions): Promise<void> {
-  const state = await readAndPersistState();
-  const blueprint = findBlueprint(state, options.blueprintId);
-
-  if (!blueprint) {
-    console.error(`Blueprint "${options.blueprintId}" was not found in local Kepler registration data.`);
+  try {
+    const response = await habitatApiClient.createModule(options.blueprintId, options.name);
+    const module = response.module;
+    console.log(
+      formatResultSummary("Module Created", [
+        ["Display Name", module.displayName],
+        ["Module ID", getShortModuleId(module)],
+        ["Full ID", module.id],
+        ["Blueprint", module.blueprintId],
+      ]),
+    );
+  } catch (error) {
+    console.error((error as Error).message);
     process.exit(1);
   }
-
-  if (blueprint.output?.itemType !== "module") {
-    console.error(`Blueprint "${options.blueprintId}" does not create a module.`);
-    process.exit(1);
-  }
-
-  const module: ModuleRecord = {
-    id: createNextLocalModuleId(state.modules, options.blueprintId),
-    blueprintId: blueprint.blueprintId,
-    displayName: options.name,
-    connectedTo: [],
-    runtimeAttributes: { ...(blueprint.runtimeAttributes ?? {}) },
-    capabilities: [...(blueprint.capabilities ?? [])],
-  };
-
-  state.modules = [...(state.modules ?? []), module];
-  await writeState(state);
-
-  console.log(
-    formatResultSummary("Module Created", [
-      ["Display Name", module.displayName],
-      ["Module ID", getShortModuleId(module)],
-      ["Full ID", module.id],
-      ["Blueprint", module.blueprintId],
-    ]),
-  );
 }
 
 async function updateModule(moduleId: string, options: ModuleUpdateOptions): Promise<void> {
-  const state = await readAndPersistState();
-  const module = findModuleById(state.modules, moduleId);
-
-  if (!module) {
-    console.error(`Module "${moduleId}" was not found.`);
-    process.exit(1);
-  }
+  const updates: { name?: string; status?: string; health?: number } = {};
 
   if (options.name !== undefined) {
-    module.displayName = options.name;
+    updates.name = options.name;
   }
 
   if (options.status !== undefined) {
-    module.runtimeAttributes.status = options.status;
+    updates.status = options.status;
   }
 
   if (options.health !== undefined) {
@@ -665,54 +595,49 @@ async function updateModule(moduleId: string, options: ModuleUpdateOptions): Pro
       process.exit(1);
     }
 
-    module.runtimeAttributes.health = health;
+    updates.health = health;
   }
 
-  await writeState(state);
-  console.log(
-    formatResultSummary("Module Updated", [
-      ["Module ID", getShortModuleId(module)],
-      ["Display Name", module.displayName],
-      ["Status", String(module.runtimeAttributes.status ?? "Unknown")],
-      ["Health", String(module.runtimeAttributes.health ?? "Unknown")],
-    ]),
-  );
+  try {
+    const response = await habitatApiClient.updateModule(moduleId, updates);
+    const module = response.module;
+    console.log(
+      formatResultSummary("Module Updated", [
+        ["Module ID", getShortModuleId(module)],
+        ["Display Name", module.displayName],
+        ["Status", String(module.runtimeAttributes.status ?? "Unknown")],
+        ["Health", String(module.runtimeAttributes.health ?? "Unknown")],
+      ]),
+    );
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
 }
 
 async function deleteModule(moduleId: string): Promise<void> {
-  const state = await readAndPersistState();
-  const module = findModuleById(state.modules, moduleId);
-
-  if (!module) {
-    console.error(`Module "${moduleId}" was not found.`);
+  try {
+    const response = await habitatApiClient.deleteModule(moduleId);
+    const module = response.module;
+    console.log(
+      formatResultSummary("Module Deleted", [
+        ["Module ID", getShortModuleId(module)],
+        ["Display Name", module.displayName],
+      ]),
+    );
+  } catch (error) {
+    console.error((error as Error).message);
     process.exit(1);
   }
-
-  state.modules = (state.modules ?? []).filter((entry) => entry.id !== module.id);
-
-  for (const entry of state.modules) {
-    entry.connectedTo = entry.connectedTo.filter((connectionId) => connectionId !== module.id);
-  }
-
-  await deleteDataFileIfEmpty(state);
-  console.log(
-    formatResultSummary("Module Deleted", [
-      ["Module ID", getShortModuleId(module)],
-      ["Display Name", module.displayName],
-    ]),
-  );
 }
 
 async function runTicks(count: string): Promise<void> {
   const tickCount = parseTickCount(count);
-  const state = await readAndPersistState();
 
   try {
+    const state = await readAndPersistState();
     const result = await runPowerSimulation(state, tickCount, () =>
-      fetchSolarIrradiance({
-        baseUrl: getKeplerBaseUrl(),
-        headers: getKeplerHeaders(),
-      }),
+      habitatApiClient.getSolarIrradiance().then((response) => response.solarIrradiance),
     );
     const constructionResult = advanceConstructionJobs(state, tickCount);
     await writeState(state);
@@ -868,6 +793,10 @@ const moduleCommand = program
   .command("module")
   .description("Manage local habitat modules.");
 
+const powerCommand = program
+  .command("power")
+  .description("Inspect habitat power state.");
+
 const blueprintCommand = program
   .command("blueprint")
   .description("Read official Kepler blueprint catalog data.");
@@ -928,6 +857,12 @@ solarCommand
   .action(showSolarStatus)
   .addHelpText("after", exampleBlock(["habitat solar status"]));
 
+powerCommand
+  .command("overview")
+  .description("Show current module states and power draw.")
+  .action(showModulePowerStatus)
+  .addHelpText("after", exampleBlock(["habitat power overview"]));
+
 inventoryCommand.addHelpText(
   "after",
   exampleBlock([
@@ -949,6 +884,14 @@ inventoryCommand
   .argument("<amount>", "Amount to add")
   .action(addInventory)
   .addHelpText("after", exampleBlock(["habitat inventory add silicate-glass 45"]));
+
+inventoryCommand
+  .command("remove")
+  .description("Remove a resource amount from local inventory.")
+  .argument("<resourceId>", "Resource ID")
+  .argument("<amount>", "Amount to remove")
+  .action(removeInventory)
+  .addHelpText("after", exampleBlock(["habitat inventory remove silicate-glass 45"]));
 
 constructionCommand.addHelpText(
   "after",
