@@ -1,0 +1,3 @@
+Kepler owns resource truth and remaining quantity because it is the authoritative planet service. It decides what resource is actually present at each coordinate, whether a tile is empty, and how much material is still left after collection. That prevents students from inventing or changing hidden world data locally and keeps the shared course contract consistent.
+
+The Habitat owns position and sensor strength because those come from local gameplay state and local equipment. The Habitat decides where the operator currently is, what scan location to request, and how effective the scanner is at that moment. That lets the Habitat manage movement, equipment state, and user actions locally while Kepler remains the source of truth for the hidden planet resources.
