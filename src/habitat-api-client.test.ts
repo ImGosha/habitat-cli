@@ -5,6 +5,7 @@ describe("habitat api client", () => {
   test("defaults to the local server base URL", async () => {
     let calledUrl = "";
     const client = new HabitatApiClient({
+      baseUrl: "http://127.0.0.1:8787",
       fetchImpl: async (input) => {
         calledUrl = String(input);
         return new Response(JSON.stringify({ registration: null }), {
@@ -56,6 +57,7 @@ describe("habitat api client", () => {
   test("requests blueprint, resource, and solar routes through the local API", async () => {
     const calledUrls: string[] = [];
     const client = new HabitatApiClient({
+      baseUrl: "http://127.0.0.1:8787",
       fetchImpl: async (input) => {
         calledUrls.push(String(input));
         return new Response(
@@ -91,9 +93,41 @@ describe("habitat api client", () => {
     ]);
   });
 
+  test("requests resource scans through the local API", async () => {
+    let calledUrl = "";
+    const client = new HabitatApiClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetchImpl: async (input) => {
+        calledUrl = String(input);
+        return new Response(
+          JSON.stringify({
+            scan: {
+              modelVersion: "scan-v1",
+              origin: { x: 3, y: -2 },
+              sensorStrength: 60,
+              radiusTiles: 1,
+              tiles: [],
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        );
+      },
+    });
+
+    await client.scan({ x: 3, y: -2, strength: 60, radius: 1 });
+
+    expect(calledUrl).toBe("http://127.0.0.1:8787/scan?x=3&y=-2&strength=60&radius=1");
+  });
+
   test("requests module and inventory routes through the local API", async () => {
     const called: Array<{ url: string; method?: string; body?: string | null }> = [];
     const client = new HabitatApiClient({
+      baseUrl: "http://127.0.0.1:8787",
       fetchImpl: async (input, init) => {
         called.push({
           url: String(input),
@@ -152,6 +186,7 @@ describe("habitat api client", () => {
   test("requests local state snapshot routes through the local API", async () => {
     const called: Array<{ url: string; method?: string; body?: string | null }> = [];
     const client = new HabitatApiClient({
+      baseUrl: "http://127.0.0.1:8787",
       fetchImpl: async (input, init) => {
         called.push({
           url: String(input),

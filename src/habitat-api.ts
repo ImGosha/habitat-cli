@@ -11,6 +11,7 @@ import { createNextLocalModuleId } from "./local-module-ids.js";
 import { findModuleById, isModuleRuntimeStatus, type ModuleRecord } from "./modules.js";
 import { fetchResourceCatalog, type ResourceRecord } from "./resources.js";
 import { getHabitatSqlitePath, findProjectRootPath } from "./project-paths.js";
+import type { ScanResponse } from "./scan.js";
 import { fetchSolarIrradiance, type SolarIrradiance } from "./solar.js";
 
 export type RegistrationResponse =
@@ -73,6 +74,8 @@ export type ResourceCatalogResponse = {
 export type SolarIrradianceResponse = {
   solarIrradiance: SolarIrradiance;
 };
+
+export type ResourceScanResponse = ScanResponse;
 
 export type ModuleListResponse = {
   modules: ModuleRecord[];
@@ -163,6 +166,19 @@ function logLine(logger: HabitatApiOptions["logger"], line: string): void {
   }
 
   console.log(line);
+}
+
+function parseIntegerQueryValue(value: string | undefined): number | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (!/^-?\d+$/.test(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : null;
 }
 
 export function createHabitatApiApp(options: HabitatApiOptions = {}): Hono {
@@ -429,6 +445,57 @@ export function createHabitatApiApp(options: HabitatApiOptions = {}): Hono {
     } catch (error) {
       return context.json<ApiErrorResponse>(createErrorResponse((error as Error).message), 502);
     }
+  });
+
+  app.get("/scan", async (context) => {
+    const state = store.readState();
+
+    if (!state.kepler) {
+      return context.json<ApiErrorResponse>(createErrorResponse("This CLI has not been registered with Kepler yet."), 404);
+    }
+
+    const x = parseIntegerQueryValue(context.req.query("x"));
+    if (x === null) {
+      return context.json<ApiErrorResponse>(createErrorResponse("x must be an integer."), 400);
+    }
+
+    const y = parseIntegerQueryValue(context.req.query("y"));
+    if (y === null) {
+      return context.json<ApiErrorResponse>(createErrorResponse("y must be an integer."), 400);
+    }
+
+    const strength = parseIntegerQueryValue(context.req.query("strength"));
+    if (strength === null || strength < 0 || strength > 100) {
+      return context.json<ApiErrorResponse>(createErrorResponse("strength must be an integer from 0 through 100."), 400);
+    }
+
+    const radius = parseIntegerQueryValue(context.req.query("radius")) ?? 0;
+    if (radius < 0 || radius > 5) {
+      return context.json<ApiErrorResponse>(createErrorResponse("radius must be an integer from 0 through 5."), 400);
+    }
+
+    const searchParams = new URLSearchParams({
+      habitatId: state.kepler.habitatId,
+      x: String(x),
+      y: String(y),
+      sensorStrength: String(strength),
+      radiusTiles: String(radius),
+    });
+
+    const path = `/world/scan?${searchParams.toString()}`;
+    const response = await keplerRequest(path, {
+      method: "GET",
+    });
+
+    if (!response.ok) {
+      const message = (await response.text()).trim() || "Unable to scan Kepler resources.";
+      return context.json<ApiErrorResponse>(createErrorResponse(`Kepler request failed: ${response.status} ${message}`), 502);
+    }
+
+    const payload = (await response.json()) as ResourceScanResponse;
+
+    logLine(options.logger, `[habitat-api] GET /scan -> ${payload.scan.tiles.length} tiles`);
+    return context.json<ResourceScanResponse>(payload);
   });
 
   app.get("/modules", (context) => {

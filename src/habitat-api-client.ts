@@ -10,6 +10,7 @@ import type {
   RegistrationDeleteResponse,
   RegistrationResponse,
   RegistrationStatusResponse,
+  ResourceScanResponse,
   ResourceCatalogResponse,
   SolarIrradianceResponse,
 } from "./habitat-api.js";
@@ -91,6 +92,19 @@ export class HabitatApiClient {
 
   async getSolarIrradiance(): Promise<SolarIrradianceResponse> {
     return this.requestJson<SolarIrradianceResponse>("/solar/irradiance", {
+      method: "GET",
+    });
+  }
+
+  async scan(options: { x: number; y: number; strength: number; radius?: number }): Promise<ResourceScanResponse> {
+    const searchParams = new URLSearchParams({
+      x: String(options.x),
+      y: String(options.y),
+      strength: String(options.strength),
+      radius: String(options.radius ?? 0),
+    });
+
+    return this.requestJson<ResourceScanResponse>(`/scan?${searchParams.toString()}`, {
       method: "GET",
     });
   }

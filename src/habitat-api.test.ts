@@ -442,6 +442,140 @@ describe("habitat api", () => {
     store.close();
   });
 
+  test("GET /scan validates inputs, supplies habitatId, and returns the Kepler scan payload unchanged", async () => {
+    const dir = createTempDir("scan-route");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState(exampleState());
+    const logs: string[] = [];
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+      logger: (line) => logs.push(line),
+      fetchImpl: async (input, init) => {
+        expect(String(input)).toBe(
+          "https://planet.turingguild.com/world/scan?habitatId=habitat_123&x=3&y=-2&sensorStrength=60&radiusTiles=1",
+        );
+        expect(init?.method).toBe("GET");
+        return new Response(
+          JSON.stringify({
+            scan: {
+              modelVersion: "scan-v1",
+              origin: {
+                x: 3,
+                y: -2,
+              },
+              sensorStrength: 60,
+              radiusTiles: 1,
+              tiles: [
+                {
+                  x: 3,
+                  y: -2,
+                  terrain: "flat",
+                  distanceTiles: 0,
+                  probabilities: [
+                    { resourceType: "ferrite", probabilityPct: 63.5 },
+                    { resourceType: null, probabilityPct: 36.5 },
+                  ],
+                  topCandidate: {
+                    resourceType: "ferrite",
+                    probabilityPct: 63.5,
+                  },
+                  quantityEstimate: {
+                    resourceType: "ferrite",
+                    unit: "kg",
+                    estimatedKg: 184,
+                    minimumKg: 160,
+                    maximumKg: 210,
+                    exact: false,
+                  },
+                },
+              ],
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        );
+      },
+    });
+
+    const response = await app.request("/scan?x=3&y=-2&strength=60&radius=1");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      scan: {
+        modelVersion: "scan-v1",
+        origin: {
+          x: 3,
+          y: -2,
+        },
+        sensorStrength: 60,
+        radiusTiles: 1,
+        tiles: [
+          {
+            x: 3,
+            y: -2,
+            terrain: "flat",
+            distanceTiles: 0,
+            probabilities: [
+              { resourceType: "ferrite", probabilityPct: 63.5 },
+              { resourceType: null, probabilityPct: 36.5 },
+            ],
+            topCandidate: {
+              resourceType: "ferrite",
+              probabilityPct: 63.5,
+            },
+            quantityEstimate: {
+              resourceType: "ferrite",
+              unit: "kg",
+              estimatedKg: 184,
+              minimumKg: 160,
+              maximumKg: 210,
+              exact: false,
+            },
+          },
+        ],
+      },
+    });
+    expect(logs).toEqual([
+      "[kepler] GET /world/scan?habitatId=habitat_123&x=3&y=-2&sensorStrength=60&radiusTiles=1 -> 200",
+      "[habitat-api] GET /scan -> 1 tiles",
+    ]);
+
+    store.close();
+  });
+
+  test("GET /scan returns clear validation errors", async () => {
+    const dir = createTempDir("scan-validation");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState(exampleState());
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+    });
+
+    const badStrength = await app.request("/scan?x=3&y=-2&strength=101&radius=0");
+    expect(badStrength.status).toBe(400);
+    expect(await badStrength.json()).toEqual({
+      error: {
+        message: "strength must be an integer from 0 through 100.",
+      },
+    });
+
+    const badRadius = await app.request("/scan?x=3&y=-2&strength=60&radius=6");
+    expect(badRadius.status).toBe(400);
+    expect(await badRadius.json()).toEqual({
+      error: {
+        message: "radius must be an integer from 0 through 5.",
+      },
+    });
+
+    store.close();
+  });
+
   test("module routes read and write local module state", async () => {
     const dir = createTempDir("module-routes");
     const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));

@@ -26,6 +26,7 @@ import { HabitatApiClient } from "./habitat-api-client.js";
 import { formatInventoryList } from "./inventory.js";
 import { type HabitatRegistrationRecord, type LocalState } from "./local-state.js";
 import { formatResourceList } from "./resources.js";
+import { formatScanReport, validateScanOptions, type ScanOptions } from "./scan.js";
 import { formatSolarStatus } from "./solar.js";
 import {
   findModuleById,
@@ -55,6 +56,14 @@ type ModuleUpdateOptions = {
 
 type ConstructOptions = {
   dryRun?: boolean;
+};
+
+type ScanCommandOptions = {
+  x: string;
+  y: string;
+  strength: string;
+  radius?: string;
+  json?: boolean;
 };
 
 const version = "0.1.0";
@@ -346,6 +355,41 @@ async function showSolarStatus(): Promise<void> {
     const response = await habitatApiClient.getSolarIrradiance();
 
     console.log(formatSolarStatus(response.solarIrradiance));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function scanResources(options: ScanCommandOptions): Promise<void> {
+  const parsedOptions: ScanOptions = {
+    x: Number(options.x),
+    y: Number(options.y),
+    strength: Number(options.strength),
+    radius: options.radius === undefined ? 0 : Number(options.radius),
+    json: options.json,
+  };
+
+  const validationMessage = validateScanOptions(parsedOptions);
+  if (validationMessage) {
+    console.error(validationMessage);
+    process.exit(1);
+  }
+
+  try {
+    const response = await habitatApiClient.scan({
+      x: parsedOptions.x,
+      y: parsedOptions.y,
+      strength: parsedOptions.strength,
+      radius: parsedOptions.radius,
+    });
+
+    if (parsedOptions.json) {
+      console.log(JSON.stringify(response, null, 2));
+      return;
+    }
+
+    console.log(formatScanReport(response));
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -809,6 +853,16 @@ const solarCommand = program
   .command("solar")
   .description("Read live Kepler solar irradiance data.");
 
+const scanCommand = program
+  .command("scan")
+  .description("Scan nearby Kepler tiles for resource probabilities.")
+  .requiredOption("--x <integer>", "Current x coordinate")
+  .requiredOption("--y <integer>", "Current y coordinate")
+  .requiredOption("--strength <0-100>", "Effective sensor strength")
+  .option("--radius <0-5>", "Scan radius in tiles", "0")
+  .option("--json", "Print the raw JSON scan response")
+  .action(scanResources);
+
 const constructionCommand = program
   .command("construction")
   .description("Inspect or cancel local construction jobs.");
@@ -856,6 +910,15 @@ solarCommand
   .description("Show current Kepler solar irradiance conditions.")
   .action(showSolarStatus)
   .addHelpText("after", exampleBlock(["habitat solar status"]));
+
+scanCommand.addHelpText(
+  "after",
+  exampleBlock([
+    "habitat scan --x 3 --y -2 --strength 60",
+    "habitat scan --x 3 --y -2 --strength 60 --radius 1",
+    "habitat scan --x 3 --y -2 --strength 60 --radius 1 --json",
+  ]),
+);
 
 powerCommand
   .command("overview")
