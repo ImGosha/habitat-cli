@@ -1,6 +1,8 @@
 import type {
   BlueprintCatalogResponse,
   BlueprintDetailsResponse,
+  HumanListResponse,
+  HumanResponse,
   InventoryMutationResponse,
   InventoryResponse,
   LocalStateResponse,
@@ -96,10 +98,8 @@ export class HabitatApiClient {
     });
   }
 
-  async scan(options: { x: number; y: number; strength: number; radius?: number }): Promise<ResourceScanResponse> {
+  async scan(options: { strength: number; radius?: number }): Promise<ResourceScanResponse> {
     const searchParams = new URLSearchParams({
-      x: String(options.x),
-      y: String(options.y),
       strength: String(options.strength),
       radius: String(options.radius ?? 0),
     });
@@ -112,6 +112,64 @@ export class HabitatApiClient {
   async listModules(): Promise<ModuleListResponse> {
     return this.requestJson<ModuleListResponse>("/modules", {
       method: "GET",
+    });
+  }
+
+  async listHumans(): Promise<HumanListResponse> {
+    return this.requestJson<HumanListResponse>("/humans", {
+      method: "GET",
+    });
+  }
+
+  async moveHuman(humanId: string, destinationModuleId: string): Promise<HumanResponse> {
+    return this.requestJson<HumanResponse>(`/humans/${encodeURIComponent(humanId)}/move`, {
+      method: "POST",
+      body: JSON.stringify({ destinationModuleId }),
+    });
+  }
+
+  async getEvaStatus(): Promise<import("./habitat-api.js").EvaResponse> {
+    return this.requestJson<import("./habitat-api.js").EvaResponse>("/eva", {
+      method: "GET",
+    });
+  }
+
+  async deployEva(humanId: string): Promise<import("./habitat-api.js").EvaResponse> {
+    return this.requestJson<import("./habitat-api.js").EvaResponse>("/eva/deploy", {
+      method: "POST",
+      body: JSON.stringify({ humanId }),
+    });
+  }
+
+  async moveEva(x: number, y: number): Promise<import("./habitat-api.js").EvaResponse> {
+    return this.requestJson<import("./habitat-api.js").EvaResponse>("/eva/move", {
+      method: "POST",
+      body: JSON.stringify({ x, y }),
+    });
+  }
+
+  async dockEva(): Promise<import("./habitat-api.js").EvaResponse> {
+    return this.requestJson<import("./habitat-api.js").EvaResponse>("/eva/dock", {
+      method: "POST",
+    });
+  }
+
+  async collectResource(quantityKg: number): Promise<import("./habitat-api.js").CollectionResponse> {
+    return this.requestJson<import("./habitat-api.js").CollectionResponse>("/collect", {
+      method: "POST",
+      body: JSON.stringify({ quantityKg }),
+    });
+  }
+
+  async listAlerts(): Promise<import("./habitat-api.js").AlertListResponse> {
+    return this.requestJson<import("./habitat-api.js").AlertListResponse>("/alerts", {
+      method: "GET",
+    });
+  }
+
+  async acknowledgeAlert(alertId: string): Promise<import("./habitat-api.js").AlertResponse> {
+    return this.requestJson<import("./habitat-api.js").AlertResponse>(`/alerts/${encodeURIComponent(alertId)}/acknowledge`, {
+      method: "POST",
     });
   }
 

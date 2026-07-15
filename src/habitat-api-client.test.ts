@@ -119,9 +119,9 @@ describe("habitat api client", () => {
       },
     });
 
-    await client.scan({ x: 3, y: -2, strength: 60, radius: 1 });
+    await client.scan({ strength: 60, radius: 1 });
 
-    expect(calledUrl).toBe("http://127.0.0.1:8787/scan?x=3&y=-2&strength=60&radius=1");
+    expect(calledUrl).toBe("http://127.0.0.1:8787/scan?strength=60&radius=1");
   });
 
   test("requests module and inventory routes through the local API", async () => {
@@ -183,6 +183,57 @@ describe("habitat api client", () => {
     ]);
   });
 
+  test("requests human routes through the local API", async () => {
+    const called: Array<{ url: string; method?: string; body?: string | null }> = [];
+    const client = new HabitatApiClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetchImpl: async (input, init) => {
+        called.push({
+          url: String(input),
+          method: init?.method,
+          body: typeof init?.body === "string" ? init.body : null,
+        });
+        return new Response(
+          JSON.stringify(
+            String(input).endsWith("/humans")
+              ? {
+                  humans: [
+                    {
+                      id: "human_1",
+                      displayName: "Alex Vega",
+                      locationModuleId: "command_module_1",
+                    },
+                  ],
+                }
+              : {
+                  human: {
+                    id: "human_1",
+                    displayName: "Alex Vega",
+                    locationModuleId: "basic_suitport_1",
+                  },
+                },
+          ),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    });
+
+    await client.listHumans();
+    await client.moveHuman("human_1", "basic_suitport_1");
+
+    expect(called).toEqual([
+      { url: "http://127.0.0.1:8787/humans", method: "GET", body: null },
+      {
+        url: "http://127.0.0.1:8787/humans/human_1/move",
+        method: "POST",
+        body: JSON.stringify({ destinationModuleId: "basic_suitport_1" }),
+      },
+    ]);
+  });
+
   test("requests local state snapshot routes through the local API", async () => {
     const called: Array<{ url: string; method?: string; body?: string | null }> = [];
     const client = new HabitatApiClient({
@@ -221,6 +272,58 @@ describe("habitat api client", () => {
         method: "PUT",
         body: JSON.stringify({ state: { modules: [], inventory: {} } }),
       },
+    ]);
+  });
+
+  test("requests eva, collect, and alert routes through the local API", async () => {
+    const called: Array<{ url: string; method?: string; body?: string | null }> = [];
+    const client = new HabitatApiClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetchImpl: async (input, init) => {
+        called.push({
+          url: String(input),
+          method: init?.method,
+          body: typeof init?.body === "string" ? init.body : null,
+        });
+        return new Response(
+          JSON.stringify(
+            String(input).endsWith("/eva")
+              ? { eva: { deployedHumanId: null, suitportModuleId: null, position: null, carriedResources: [], carryCapacityKg: 20 } }
+              : String(input).endsWith("/eva/deploy") || String(input).endsWith("/eva/move") || String(input).endsWith("/eva/dock")
+                ? { eva: { deployedHumanId: "human_1", suitportModuleId: "basic_suitport_1", position: { x: 0, y: 0 }, carriedResources: [], carryCapacityKg: 20 } }
+                : String(input).endsWith("/collect")
+                  ? {
+                      collection: { x: 0, y: 0, resourceType: "ferrite", unit: "kg", collectedKg: 1, remainingKg: 9 },
+                      eva: { deployedHumanId: "human_1", suitportModuleId: "basic_suitport_1", position: { x: 0, y: 0 }, carriedResources: [{ resourceType: "ferrite", quantityKg: 1 }], carryCapacityKg: 20 },
+                    }
+                  : String(input).endsWith("/alerts")
+                    ? { alerts: [{ id: "alert_1", code: "eva-human-deployed", title: "Human Deployed", description: "A human is outside the habitat.", severity: "warning", status: "open", source: "eva", openedAt: "2026-07-15T00:00:00.000Z", lastObservedAt: "2026-07-15T00:00:00.000Z", occurrenceCount: 1 }] }
+                    : { alert: { id: "alert_1", code: "eva-human-deployed", title: "Human Deployed", description: "A human is outside the habitat.", severity: "warning", status: "acknowledged", source: "eva", openedAt: "2026-07-15T00:00:00.000Z", lastObservedAt: "2026-07-15T00:00:01.000Z", occurrenceCount: 1 } },
+          ),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    });
+
+    await client.getEvaStatus();
+    await client.deployEva("human_1");
+    await client.moveEva(1, 0);
+    await client.dockEva();
+    await client.collectResource(1);
+    await client.listAlerts();
+    await client.acknowledgeAlert("alert_1");
+
+    expect(called).toEqual([
+      { url: "http://127.0.0.1:8787/eva", method: "GET", body: null },
+      { url: "http://127.0.0.1:8787/eva/deploy", method: "POST", body: JSON.stringify({ humanId: "human_1" }) },
+      { url: "http://127.0.0.1:8787/eva/move", method: "POST", body: JSON.stringify({ x: 1, y: 0 }) },
+      { url: "http://127.0.0.1:8787/eva/dock", method: "POST", body: null },
+      { url: "http://127.0.0.1:8787/collect", method: "POST", body: JSON.stringify({ quantityKg: 1 }) },
+      { url: "http://127.0.0.1:8787/alerts", method: "GET", body: null },
+      { url: "http://127.0.0.1:8787/alerts/alert_1/acknowledge", method: "POST", body: null },
     ]);
   });
 });

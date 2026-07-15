@@ -92,14 +92,14 @@ describe("scan formatting", () => {
 
 describe("scan validation", () => {
   test("accepts valid scan options", () => {
-    expect(validateScanOptions({ x: 3, y: -2, strength: 60, radius: 1 })).toBeNull();
+    expect(validateScanOptions({ strength: 60, radius: 1 })).toBeNull();
   });
 
   test("rejects invalid strength and radius values", () => {
-    expect(validateScanOptions({ x: 3, y: -2, strength: 101, radius: 1 })).toBe(
+    expect(validateScanOptions({ strength: 101, radius: 1 })).toBe(
       "strength must be an integer from 0 through 100.",
     );
-    expect(validateScanOptions({ x: 3, y: -2, strength: 60, radius: 6 })).toBe(
+    expect(validateScanOptions({ strength: 60, radius: 6 })).toBe(
       "radius must be an integer from 0 through 5.",
     );
   });

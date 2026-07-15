@@ -41,8 +41,6 @@ export type ScanResponse = {
 };
 
 export type ScanOptions = {
-  x: number;
-  y: number;
   strength: number;
   radius: number;
   json?: boolean;
@@ -99,14 +97,6 @@ function formatQuantityEstimateDetails(quantityEstimate: ScanTile["quantityEstim
 }
 
 export function validateScanOptions(options: ScanOptions): string | null {
-  if (!Number.isInteger(options.x)) {
-    return "x must be an integer.";
-  }
-
-  if (!Number.isInteger(options.y)) {
-    return "y must be an integer.";
-  }
-
   if (!Number.isInteger(options.strength) || options.strength < 0 || options.strength > 100) {
     return "strength must be an integer from 0 through 100.";
   }

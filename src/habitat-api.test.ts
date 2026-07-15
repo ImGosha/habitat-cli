@@ -30,7 +30,16 @@ function exampleState(): LocalState {
       displayName: "Artemis Ridge",
       habitatUuid: "uuid-123",
       habitatId: "habitat_123",
+      contracts: {
+        alerts: {
+          schemaVersion: "1.0",
+          schema: {
+            required: ["id", "code"],
+          },
+        },
+      },
       starterModules: [],
+      starterHumans: [],
       blueprints: [],
     },
   };
@@ -92,6 +101,14 @@ describe("habitat api", () => {
         return new Response(
           JSON.stringify({
             habitatId: "habitat_123",
+            contracts: {
+              alerts: {
+                schemaVersion: "1.0",
+                schema: {
+                  required: ["id", "code", "status"],
+                },
+              },
+            },
             starterModules: [
               {
                 id: "habitat_123_command_module_1",
@@ -102,6 +119,18 @@ describe("habitat api", () => {
                   status: "active",
                 },
                 capabilities: ["habitat-command"],
+              },
+            ],
+            starterHumans: [
+              {
+                id: "human_1",
+                displayName: "Alex Vega",
+                locationModuleId: "habitat_123_command_module_1",
+              },
+              {
+                id: "human_2",
+                displayName: "Sam Carter",
+                locationModuleId: "habitat_123_command_module_1",
               },
             ],
             blueprints: [
@@ -140,10 +169,42 @@ describe("habitat api", () => {
       },
     });
     expect(store.readState().kepler?.displayName).toBe("Artemis Ridge");
+    expect(store.readState().kepler?.starterHumans).toEqual([
+      {
+        id: "human_1",
+        displayName: "Alex Vega",
+        locationModuleId: "habitat_123_command_module_1",
+      },
+      {
+        id: "human_2",
+        displayName: "Sam Carter",
+        locationModuleId: "habitat_123_command_module_1",
+      },
+    ]);
+    expect(store.readState().kepler?.contracts).toEqual({
+      alerts: {
+        schemaVersion: "1.0",
+        schema: {
+          required: ["id", "code", "status"],
+        },
+      },
+    });
     expect(store.readState().modules?.length).toBe(1);
+    expect(store.readState().humans).toEqual([
+      {
+        id: "human_1",
+        displayName: "Alex Vega",
+        locationModuleId: "habitat_123_command_module_1",
+      },
+      {
+        id: "human_2",
+        displayName: "Sam Carter",
+        locationModuleId: "habitat_123_command_module_1",
+      },
+    ]);
     expect(logs).toEqual([
       "[kepler] POST /habitats/register -> 201",
-      "[habitat-api] POST /registration -> 1 starter modules",
+      "[habitat-api] POST /registration -> 1 starter modules, 2 starter humans",
     ]);
 
     store.close();
@@ -442,10 +503,19 @@ describe("habitat api", () => {
     store.close();
   });
 
-  test("GET /scan validates inputs, supplies habitatId, and returns the Kepler scan payload unchanged", async () => {
+  test("GET /scan uses the deployed EVA position, supplies habitatId, and returns the Kepler scan payload unchanged", async () => {
     const dir = createTempDir("scan-route");
     const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
-    store.writeState(exampleState());
+    store.writeState({
+      ...exampleState(),
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 1, y: 0 },
+        carriedResources: [],
+        carryCapacityKg: 20,
+      },
+    });
     const logs: string[] = [];
     const app = createHabitatApiApp({
       store,
@@ -453,7 +523,7 @@ describe("habitat api", () => {
       logger: (line) => logs.push(line),
       fetchImpl: async (input, init) => {
         expect(String(input)).toBe(
-          "https://planet.turingguild.com/world/scan?habitatId=habitat_123&x=3&y=-2&sensorStrength=60&radiusTiles=1",
+          "https://planet.turingguild.com/world/scan?habitatId=habitat_123&x=1&y=0&sensorStrength=60&radiusTiles=1",
         );
         expect(init?.method).toBe("GET");
         return new Response(
@@ -461,15 +531,15 @@ describe("habitat api", () => {
             scan: {
               modelVersion: "scan-v1",
               origin: {
-                x: 3,
-                y: -2,
+                x: 1,
+                y: 0,
               },
               sensorStrength: 60,
               radiusTiles: 1,
               tiles: [
                 {
-                  x: 3,
-                  y: -2,
+                  x: 1,
+                  y: 0,
                   terrain: "flat",
                   distanceTiles: 0,
                   probabilities: [
@@ -502,22 +572,22 @@ describe("habitat api", () => {
       },
     });
 
-    const response = await app.request("/scan?x=3&y=-2&strength=60&radius=1");
+    const response = await app.request("/scan?strength=60&radius=1");
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       scan: {
         modelVersion: "scan-v1",
         origin: {
-          x: 3,
-          y: -2,
+          x: 1,
+          y: 0,
         },
         sensorStrength: 60,
         radiusTiles: 1,
         tiles: [
           {
-            x: 3,
-            y: -2,
+            x: 1,
+            y: 0,
             terrain: "flat",
             distanceTiles: 0,
             probabilities: [
@@ -541,7 +611,7 @@ describe("habitat api", () => {
       },
     });
     expect(logs).toEqual([
-      "[kepler] GET /world/scan?habitatId=habitat_123&x=3&y=-2&sensorStrength=60&radiusTiles=1 -> 200",
+      "[kepler] GET /world/scan?habitatId=habitat_123&x=1&y=0&sensorStrength=60&radiusTiles=1 -> 200",
       "[habitat-api] GET /scan -> 1 tiles",
     ]);
 
@@ -551,13 +621,22 @@ describe("habitat api", () => {
   test("GET /scan returns clear validation errors", async () => {
     const dir = createTempDir("scan-validation");
     const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
-    store.writeState(exampleState());
+    store.writeState({
+      ...exampleState(),
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 0, y: 0 },
+        carriedResources: [],
+        carryCapacityKg: 20,
+      },
+    });
     const app = createHabitatApiApp({
       store,
       keplerToken: "test-token",
     });
 
-    const badStrength = await app.request("/scan?x=3&y=-2&strength=101&radius=0");
+    const badStrength = await app.request("/scan?strength=101&radius=0");
     expect(badStrength.status).toBe(400);
     expect(await badStrength.json()).toEqual({
       error: {
@@ -565,11 +644,32 @@ describe("habitat api", () => {
       },
     });
 
-    const badRadius = await app.request("/scan?x=3&y=-2&strength=60&radius=6");
+    const badRadius = await app.request("/scan?strength=60&radius=6");
     expect(badRadius.status).toBe(400);
     expect(await badRadius.json()).toEqual({
       error: {
         message: "radius must be an integer from 0 through 5.",
+      },
+    });
+
+    store.close();
+  });
+
+  test("GET /scan requires a deployed explorer", async () => {
+    const dir = createTempDir("scan-no-explorer");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState(exampleState());
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+    });
+
+    const response = await app.request("/scan?strength=60&radius=0");
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        message: "No human is currently deployed for EVA.",
       },
     });
 
@@ -585,6 +685,7 @@ describe("habitat api", () => {
         displayName: "Artemis Ridge",
         habitatUuid: "uuid-123",
         habitatId: "habitat_123",
+        starterHumans: [],
         starterModules: [],
         blueprints: [
           {
@@ -725,6 +826,972 @@ describe("habitat api", () => {
       "[habitat-api] PUT /inventory/ferrite -> 10 to 15",
       "[habitat-api] PUT /inventory/ferrite -> 15 to 12",
     ]);
+
+    store.close();
+  });
+
+  test("human routes list persisted humans and move them between valid modules", async () => {
+    const dir = createTempDir("human-routes");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState({
+      modules: [
+        {
+          id: "command_module_1",
+          blueprintId: "command-module",
+          displayName: "Command Module",
+          connectedTo: [],
+          runtimeAttributes: {
+            status: "active",
+            crewCapacity: 2,
+          },
+          capabilities: ["habitat-command"],
+        },
+        {
+          id: "basic_suitport_1",
+          blueprintId: "basic-suitport",
+          displayName: "Basic Suitport",
+          connectedTo: [],
+          runtimeAttributes: {
+            status: "online",
+            crewCapacity: 1,
+          },
+          capabilities: ["limited-eva", "suitport-access"],
+        },
+      ],
+      humans: [
+        {
+          id: "human_1",
+          displayName: "Alex Vega",
+          locationModuleId: "command_module_1",
+        },
+        {
+          id: "human_2",
+          displayName: "Sam Carter",
+          locationModuleId: "command_module_1",
+        },
+      ],
+    });
+    const logs: string[] = [];
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+      logger: (line) => logs.push(line),
+    });
+
+    const listResponse = await app.request("/humans");
+    expect(listResponse.status).toBe(200);
+    expect(await listResponse.json()).toEqual({
+      humans: [
+        {
+          id: "human_1",
+          displayName: "Alex Vega",
+          locationModuleId: "command_module_1",
+        },
+        {
+          id: "human_2",
+          displayName: "Sam Carter",
+          locationModuleId: "command_module_1",
+        },
+      ],
+    });
+
+    const moveResponse = await app.request("/humans/human_1/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        destinationModuleId: "basic_suitport_1",
+      }),
+    });
+    expect(moveResponse.status).toBe(200);
+    expect(await moveResponse.json()).toEqual({
+      human: {
+        id: "human_1",
+        displayName: "Alex Vega",
+        locationModuleId: "basic_suitport_1",
+      },
+    });
+    expect(store.readState().humans).toEqual([
+      {
+        id: "human_1",
+        displayName: "Alex Vega",
+        locationModuleId: "basic_suitport_1",
+      },
+      {
+        id: "human_2",
+        displayName: "Sam Carter",
+        locationModuleId: "command_module_1",
+      },
+    ]);
+    expect(logs).toEqual([
+      "[habitat-api] GET /humans -> 2 humans",
+      "[habitat-api] POST /humans/human_1/move -> basic_suitport_1",
+    ]);
+
+    store.close();
+  });
+
+  test("human move rejects missing humans, missing modules, and full modules", async () => {
+    const dir = createTempDir("human-move-rejections");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState({
+      modules: [
+        {
+          id: "command_module_1",
+          blueprintId: "command-module",
+          displayName: "Command Module",
+          connectedTo: [],
+          runtimeAttributes: {
+            status: "active",
+            crewCapacity: 2,
+          },
+          capabilities: ["habitat-command"],
+        },
+        {
+          id: "basic_suitport_1",
+          blueprintId: "basic-suitport",
+          displayName: "Basic Suitport",
+          connectedTo: [],
+          runtimeAttributes: {
+            status: "online",
+            crewCapacity: 1,
+          },
+          capabilities: ["limited-eva", "suitport-access"],
+        },
+      ],
+      humans: [
+        {
+          id: "human_1",
+          displayName: "Alex Vega",
+          locationModuleId: "command_module_1",
+        },
+        {
+          id: "human_2",
+          displayName: "Sam Carter",
+          locationModuleId: "basic_suitport_1",
+        },
+      ],
+    });
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+    });
+
+    const missingHumanResponse = await app.request("/humans/missing_human/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        destinationModuleId: "command_module_1",
+      }),
+    });
+    expect(missingHumanResponse.status).toBe(404);
+    expect(await missingHumanResponse.json()).toEqual({
+      error: {
+        message: 'Human "missing_human" was not found.',
+      },
+    });
+
+    const missingModuleResponse = await app.request("/humans/human_1/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        destinationModuleId: "missing_module",
+      }),
+    });
+    expect(missingModuleResponse.status).toBe(404);
+    expect(await missingModuleResponse.json()).toEqual({
+      error: {
+        message: 'Module "missing_module" was not found.',
+      },
+    });
+
+    const fullModuleResponse = await app.request("/humans/human_1/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        destinationModuleId: "basic_suitport_1",
+      }),
+    });
+    expect(fullModuleResponse.status).toBe(409);
+    expect(await fullModuleResponse.json()).toEqual({
+      error: {
+        message: 'Module "basic_suitport_1" is already at full crew capacity.',
+      },
+    });
+    expect(store.readState().humans).toEqual([
+      {
+        id: "human_1",
+        displayName: "Alex Vega",
+        locationModuleId: "command_module_1",
+      },
+      {
+        id: "human_2",
+        displayName: "Sam Carter",
+        locationModuleId: "basic_suitport_1",
+      },
+    ]);
+
+    store.close();
+  });
+
+  test("module deletion rejects occupied modules", async () => {
+    const dir = createTempDir("occupied-module-delete");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState({
+      modules: [
+        {
+          id: "command_module_1",
+          blueprintId: "command-module",
+          displayName: "Command Module",
+          connectedTo: [],
+          runtimeAttributes: {
+            status: "active",
+            crewCapacity: 2,
+          },
+          capabilities: ["habitat-command"],
+        },
+      ],
+      humans: [
+        {
+          id: "human_1",
+          displayName: "Alex Vega",
+          locationModuleId: "command_module_1",
+        },
+      ],
+    });
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+    });
+
+    const response = await app.request("/modules/command_module_1", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        message: 'Module "command_module_1" cannot be deleted while occupied by human "human_1".',
+      },
+    });
+    expect(store.readState().modules).toHaveLength(1);
+
+    store.close();
+  });
+
+  test("eva routes deploy one explorer, move one tile at a time, and report status", async () => {
+    const dir = createTempDir("eva-routes");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState({
+      kepler: {
+        baseUrl: "https://planet.turingguild.com",
+        displayName: "Artemis Ridge",
+        habitatUuid: "uuid-123",
+        habitatId: "habitat_123",
+        contracts: {
+          alerts: {
+            schemaVersion: "1.0",
+            schema: {},
+          },
+        },
+        starterModules: [],
+        starterHumans: [],
+        blueprints: [],
+      },
+      modules: [
+        {
+          id: "basic_suitport_1",
+          blueprintId: "basic-suitport",
+          displayName: "Basic Suitport",
+          connectedTo: [],
+          runtimeAttributes: {
+            status: "online",
+            crewCapacity: 1,
+          },
+          capabilities: ["limited-eva", "suitport-access"],
+        },
+      ],
+      humans: [
+        {
+          id: "human_1",
+          displayName: "Alex Vega",
+          locationModuleId: "basic_suitport_1",
+        },
+      ],
+    });
+    const logs: string[] = [];
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+      logger: (line) => logs.push(line),
+      fetchImpl: async (input, init) => {
+        expect(String(input)).toBe("https://planet.turingguild.com/world/sectors/current?habitatId=habitat_123");
+        expect(init?.method).toBe("GET");
+        return new Response(
+          JSON.stringify({
+            sector: {
+              id: "kepler-local-001",
+              displayName: "Starter Sector",
+              origin: { x: 0, y: 0 },
+              bounds: {
+                minX: -25,
+                maxX: 24,
+                minY: -25,
+                maxY: 24,
+              },
+              tileSizeMeters: 100,
+              supportedTerrains: ["flat"],
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    });
+
+    const deployResponse = await app.request("/eva/deploy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ humanId: "human_1" }),
+    });
+    expect(deployResponse.status).toBe(200);
+    expect(await deployResponse.json()).toEqual({
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 0, y: 0 },
+        carriedResources: [],
+        carryCapacityKg: 20,
+      },
+    });
+
+    const moveResponse = await app.request("/eva/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: 1, y: 0 }),
+    });
+    expect(moveResponse.status).toBe(200);
+    expect(await moveResponse.json()).toEqual({
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 1, y: 0 },
+        carriedResources: [],
+        carryCapacityKg: 20,
+      },
+    });
+
+    const statusResponse = await app.request("/eva");
+    expect(statusResponse.status).toBe(200);
+    expect(await statusResponse.json()).toEqual({
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 1, y: 0 },
+        carriedResources: [],
+        carryCapacityKg: 20,
+      },
+    });
+    expect(logs).toEqual([
+      "[kepler] GET /world/sectors/current?habitatId=habitat_123 -> 200",
+      "[habitat-api] POST /eva/deploy -> human_1",
+      "[kepler] GET /world/sectors/current?habitatId=habitat_123 -> 200",
+      "[habitat-api] POST /eva/move -> (1, 0)",
+      "[habitat-api] GET /eva -> human_1",
+    ]);
+
+    store.close();
+  });
+
+  test("eva routes reject invalid deploy, movement, and docking actions", async () => {
+    const dir = createTempDir("eva-rejections");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState({
+      kepler: {
+        baseUrl: "https://planet.turingguild.com",
+        displayName: "Artemis Ridge",
+        habitatUuid: "uuid-123",
+        habitatId: "habitat_123",
+        contracts: {
+          alerts: {
+            schemaVersion: "1.0",
+            schema: {},
+          },
+        },
+        starterModules: [],
+        starterHumans: [],
+        blueprints: [],
+      },
+      modules: [
+        {
+          id: "command_module_1",
+          blueprintId: "command-module",
+          displayName: "Command Module",
+          connectedTo: [],
+          runtimeAttributes: {
+            status: "active",
+            crewCapacity: 2,
+          },
+          capabilities: ["habitat-command"],
+        },
+        {
+          id: "basic_suitport_1",
+          blueprintId: "basic-suitport",
+          displayName: "Basic Suitport",
+          connectedTo: [],
+          runtimeAttributes: {
+            status: "online",
+            crewCapacity: 1,
+          },
+          capabilities: ["limited-eva", "suitport-access"],
+        },
+      ],
+      humans: [
+        {
+          id: "human_1",
+          displayName: "Alex Vega",
+          locationModuleId: "command_module_1",
+        },
+      ],
+    });
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            sector: {
+              id: "kepler-local-001",
+              displayName: "Starter Sector",
+              origin: { x: 0, y: 0 },
+              bounds: {
+                minX: -1,
+                maxX: 1,
+                minY: -1,
+                maxY: 1,
+              },
+              tileSizeMeters: 100,
+              supportedTerrains: ["flat"],
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+    });
+
+    const deployResponse = await app.request("/eva/deploy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ humanId: "human_1" }),
+    });
+    expect(deployResponse.status).toBe(409);
+    expect(await deployResponse.json()).toEqual({
+      error: {
+        message: 'Human "human_1" must be in a suitport module before EVA deployment.',
+      },
+    });
+
+    store.writeState({
+      ...store.readState(),
+      humans: [
+        {
+          id: "human_1",
+          displayName: "Alex Vega",
+          locationModuleId: "basic_suitport_1",
+        },
+      ],
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 1, y: 0 },
+        carriedResources: [],
+        carryCapacityKg: 20,
+      },
+    });
+
+    const diagonalResponse = await app.request("/eva/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: 2, y: 1 }),
+    });
+    expect(diagonalResponse.status).toBe(409);
+    expect(await diagonalResponse.json()).toEqual({
+      error: {
+        message: "EVA movement must be exactly one tile north, south, east, or west.",
+      },
+    });
+
+    const jumpResponse = await app.request("/eva/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: 5, y: 0 }),
+    });
+    expect(jumpResponse.status).toBe(409);
+    expect(await jumpResponse.json()).toEqual({
+      error: {
+        message: "EVA movement must be exactly one tile north, south, east, or west.",
+      },
+    });
+
+    const outOfBoundsResponse = await app.request("/eva/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: 2, y: 0 }),
+    });
+    expect(outOfBoundsResponse.status).toBe(409);
+    expect(await outOfBoundsResponse.json()).toEqual({
+      error: {
+        message: "EVA movement cannot leave the current Kepler sector.",
+      },
+    });
+
+    const dockResponse = await app.request("/eva/dock", {
+      method: "POST",
+    });
+    expect(dockResponse.status).toBe(409);
+    expect(await dockResponse.json()).toEqual({
+      error: {
+        message: "EVA docking is only allowed at habitat origin (0, 0).",
+      },
+    });
+    expect(store.readState().eva).toEqual({
+      deployedHumanId: "human_1",
+      suitportModuleId: "basic_suitport_1",
+      position: { x: 1, y: 0 },
+      carriedResources: [],
+      carryCapacityKg: 20,
+    });
+
+    store.close();
+  });
+
+  test("collect route validates EVA state, calls Kepler, and adds carried material after success", async () => {
+    const dir = createTempDir("collect-success");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState({
+      kepler: {
+        baseUrl: "https://planet.turingguild.com",
+        displayName: "Artemis Ridge",
+        habitatUuid: "uuid-123",
+        habitatId: "habitat_123",
+        contracts: {
+          alerts: {
+            schemaVersion: "1.0",
+            schema: {},
+          },
+        },
+        starterModules: [],
+        starterHumans: [],
+        blueprints: [],
+      },
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 1, y: 0 },
+        carriedResources: [],
+        carryCapacityKg: 20,
+      },
+    });
+    const logs: string[] = [];
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+      logger: (line) => logs.push(line),
+      fetchImpl: async (input, init) => {
+        expect(String(input)).toBe("https://planet.turingguild.com/world/collect");
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({
+          habitatId: "habitat_123",
+          x: 1,
+          y: 0,
+          quantityKg: 5,
+        }));
+        return new Response(
+          JSON.stringify({
+            collection: {
+              x: 1,
+              y: 0,
+              resourceType: "ferrite",
+              unit: "kg",
+              collectedKg: 5,
+              remainingKg: 179,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      },
+    });
+
+    const response = await app.request("/collect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quantityKg: 5 }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      collection: {
+        x: 1,
+        y: 0,
+        resourceType: "ferrite",
+        unit: "kg",
+        collectedKg: 5,
+        remainingKg: 179,
+      },
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 1, y: 0 },
+        carriedResources: [
+          {
+            resourceType: "ferrite",
+            quantityKg: 5,
+          },
+        ],
+        carryCapacityKg: 20,
+      },
+    });
+    expect(store.readState().eva?.carriedResources).toEqual([
+      {
+        resourceType: "ferrite",
+        quantityKg: 5,
+      },
+    ]);
+    expect(logs).toEqual([
+      "[kepler] POST /world/collect -> 200",
+      "[habitat-api] POST /collect -> ferrite 5 kg",
+    ]);
+
+    store.close();
+  });
+
+  test("collect route rejects invalid local state and preserves carried material on Kepler failure", async () => {
+    const dir = createTempDir("collect-failures");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState({
+      kepler: {
+        baseUrl: "https://planet.turingguild.com",
+        displayName: "Artemis Ridge",
+        habitatUuid: "uuid-123",
+        habitatId: "habitat_123",
+        contracts: {
+          alerts: {
+            schemaVersion: "1.0",
+            schema: {},
+          },
+        },
+        starterModules: [],
+        starterHumans: [],
+        blueprints: [],
+      },
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 1, y: 0 },
+        carriedResources: [
+          {
+            resourceType: "ferrite",
+            quantityKg: 18,
+          },
+        ],
+        carryCapacityKg: 20,
+      },
+    });
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message: "Tile has no material remaining.",
+            },
+          }),
+          {
+            status: 409,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+    });
+
+    const overCapacityResponse = await app.request("/collect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quantityKg: 3 }),
+    });
+    expect(overCapacityResponse.status).toBe(409);
+    expect(await overCapacityResponse.json()).toEqual({
+      error: {
+        message: "Collecting that quantity would exceed EVA carrying capacity.",
+      },
+    });
+
+    store.writeState({
+      ...store.readState(),
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 1, y: 0 },
+        carriedResources: [],
+        carryCapacityKg: 20,
+      },
+    });
+
+    const keplerFailureResponse = await app.request("/collect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quantityKg: 1 }),
+    });
+    expect(keplerFailureResponse.status).toBe(409);
+    expect(await keplerFailureResponse.json()).toEqual({
+      error: {
+        message: "Kepler request failed: 409 Tile has no material remaining.",
+      },
+    });
+    expect(store.readState().eva?.carriedResources).toEqual([]);
+
+    store.close();
+  });
+
+  test("eva dock unloads carried resources into inventory, clears EVA state, and resolves deployment alerts", async () => {
+    const dir = createTempDir("dock-success");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState({
+      kepler: {
+        baseUrl: "https://planet.turingguild.com",
+        displayName: "Artemis Ridge",
+        habitatUuid: "uuid-123",
+        habitatId: "habitat_123",
+        contracts: {
+          alerts: {
+            schemaVersion: "1.0",
+            schema: {},
+          },
+        },
+        starterModules: [],
+        starterHumans: [],
+        blueprints: [],
+      },
+      inventory: {
+        ferrite: 10,
+      },
+      modules: [
+        {
+          id: "basic_suitport_1",
+          blueprintId: "basic-suitport",
+          displayName: "Basic Suitport",
+          connectedTo: [],
+          runtimeAttributes: {
+            status: "online",
+            crewCapacity: 1,
+          },
+          capabilities: ["limited-eva", "suitport-access"],
+        },
+      ],
+      humans: [
+        {
+          id: "human_1",
+          displayName: "Alex Vega",
+          locationModuleId: "basic_suitport_1",
+        },
+      ],
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 0, y: 0 },
+        carriedResources: [
+          {
+            resourceType: "ferrite",
+            quantityKg: 5,
+          },
+        ],
+        carryCapacityKg: 20,
+      },
+      alerts: [
+        {
+          id: "alert_1",
+          code: "eva-human-deployed",
+          title: "Human Deployed",
+          description: "A human is outside the habitat.",
+          severity: "warning",
+          status: "open",
+          source: "eva",
+          openedAt: "2026-07-15T00:00:00.000Z",
+          lastObservedAt: "2026-07-15T00:00:00.000Z",
+          occurrenceCount: 1,
+          subject: {
+            type: "human",
+            id: "human_1",
+          },
+        },
+      ],
+    });
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+    });
+
+    const response = await app.request("/eva/dock", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      eva: {
+        deployedHumanId: null,
+        suitportModuleId: null,
+        position: null,
+        carriedResources: [],
+        carryCapacityKg: 20,
+      },
+    });
+    expect(store.readState().inventory).toEqual({
+      ferrite: 15,
+    });
+    expect(store.readState().humans).toEqual([
+      {
+        id: "human_1",
+        displayName: "Alex Vega",
+        locationModuleId: "basic_suitport_1",
+      },
+    ]);
+    expect(store.readState().alerts?.[0].status).toBe("resolved");
+    expect(store.readState().alerts?.[0].resolvedAt).toEqual(expect.any(String));
+
+    store.close();
+  });
+
+  test("alert routes list, acknowledge, dedupe repeated failures, and create capacity alerts", async () => {
+    const dir = createTempDir("alert-routes");
+    const store = new SqliteLocalStateStore(join(dir, "habitat.sqlite"));
+    store.writeState({
+      kepler: {
+        baseUrl: "https://planet.turingguild.com",
+        displayName: "Artemis Ridge",
+        habitatUuid: "uuid-123",
+        habitatId: "habitat_123",
+        contracts: {
+          alerts: {
+            schemaVersion: "1.0",
+            schema: {},
+          },
+        },
+        starterModules: [],
+        starterHumans: [],
+        blueprints: [],
+      },
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 1, y: 0 },
+        carriedResources: [
+          {
+            resourceType: "ferrite",
+            quantityKg: 19,
+          },
+        ],
+        carryCapacityKg: 20,
+      },
+    });
+    let collectRequestCount = 0;
+    const app = createHabitatApiApp({
+      store,
+      keplerToken: "test-token",
+      fetchImpl: async (input) => {
+        if (String(input).endsWith("/world/collect")) {
+          collectRequestCount += 1;
+          if (collectRequestCount === 1) {
+            return new Response(
+              JSON.stringify({
+                collection: {
+                  x: 1,
+                  y: 0,
+                  resourceType: "ferrite",
+                  unit: "kg",
+                  collectedKg: 1,
+                  remainingKg: 50,
+                },
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: "Tile has no material remaining.",
+              },
+            }),
+            {
+              status: 409,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        return new Response("not found", { status: 404 });
+      },
+    });
+
+    const capacityResponse = await app.request("/collect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quantityKg: 1 }),
+    });
+    expect(capacityResponse.status).toBe(200);
+
+    store.writeState({
+      ...store.readState(),
+      eva: {
+        deployedHumanId: "human_1",
+        suitportModuleId: "basic_suitport_1",
+        position: { x: 1, y: 0 },
+        carriedResources: [],
+        carryCapacityKg: 20,
+      },
+    });
+
+    const firstFailure = await app.request("/collect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quantityKg: 1 }),
+    });
+    expect(firstFailure.status).toBe(409);
+
+    const secondFailure = await app.request("/collect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quantityKg: 1 }),
+    });
+    expect(secondFailure.status).toBe(409);
+
+    const listResponse = await app.request("/alerts");
+    expect(listResponse.status).toBe(200);
+    const listPayload = await listResponse.json();
+    expect(listPayload.alerts).toHaveLength(2);
+
+    const capacityAlert = listPayload.alerts.find((alert: { code: string }) => alert.code === "eva-carry-capacity-reached");
+    expect(capacityAlert.status).toBe("open");
+    expect(capacityAlert.occurrenceCount).toBe(1);
+
+    const failureAlert = listPayload.alerts.find((alert: { code: string }) => alert.code === "eva-collection-failed");
+    expect(failureAlert.status).toBe("open");
+    expect(failureAlert.occurrenceCount).toBe(2);
+
+    const acknowledgeResponse = await app.request(`/alerts/${failureAlert.id}/acknowledge`, {
+      method: "POST",
+    });
+    expect(acknowledgeResponse.status).toBe(200);
+    expect((await acknowledgeResponse.json()).alert.status).toBe("acknowledged");
 
     store.close();
   });

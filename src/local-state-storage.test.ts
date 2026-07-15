@@ -29,6 +29,7 @@ function exampleState(): LocalState {
       displayName: "Artemis Ridge",
       habitatUuid: "uuid-1",
       habitatId: "habitat_1",
+      starterHumans: [],
       starterModules: [
         {
           id: "habitat_1_command_module_1",

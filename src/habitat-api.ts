@@ -2,9 +2,13 @@ import dotenv from "dotenv";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { Hono } from "hono";
+import { acknowledgeAlert, listAlerts, openOrUpdateAlert, resolveAlertByCode } from "./alerts.js";
 import { fetchBlueprintCatalog, fetchBlueprintDetails, type BlueprintRecord } from "./blueprints.js";
+import { addCarriedResource, ensureCarryCapacity, type WorldCollectionRecord, validateCollectionQuantity } from "./collection.js";
 import { getEffectiveInventory } from "./construction.js";
-import { cloneModule, type HabitatRegistrationRecord } from "./local-state.js";
+import { deployHumanForEva, ensureDockable, getEvaState, moveEva, type WorldSectorBounds } from "./eva.js";
+import { canMoveHumanToModule, findHumanById } from "./humans.js";
+import { cloneModule, type HabitatRegistrationRecord, type HabitatAlertContracts, type StarterHumanRecord } from "./local-state.js";
 import { SqliteLocalStateStore } from "./local-state-storage.js";
 import { addInventoryResource, removeInventoryResource } from "./inventory.js";
 import { createNextLocalModuleId } from "./local-module-ids.js";
@@ -85,6 +89,14 @@ export type ModuleResponse = {
   module: ModuleRecord;
 };
 
+export type HumanListResponse = {
+  humans: StarterHumanRecord[];
+};
+
+export type HumanResponse = {
+  human: StarterHumanRecord;
+};
+
 export type InventoryResponse = {
   inventory: Record<string, number>;
 };
@@ -93,6 +105,23 @@ export type InventoryMutationResponse = {
   resourceId: string;
   previousAmount: number;
   newAmount: number;
+};
+
+export type EvaResponse = {
+  eva: import("./local-state.js").LocalEvaState;
+};
+
+export type CollectionResponse = {
+  collection: WorldCollectionRecord;
+  eva: import("./local-state.js").LocalEvaState;
+};
+
+export type AlertListResponse = {
+  alerts: import("./local-state.js").AlertRecord[];
+};
+
+export type AlertResponse = {
+  alert: import("./local-state.js").AlertRecord;
 };
 
 export type LocalStateResponse = {
@@ -112,7 +141,9 @@ type HabitatApiOptions = {
 
 type KeplerRegistrationResponse = {
   habitatId: string;
+  contracts?: HabitatAlertContracts;
   starterModules: ModuleRecord[];
+  starterHumans: StarterHumanRecord[];
   blueprints: Array<Record<string, unknown>>;
 };
 
@@ -130,6 +161,12 @@ type KeplerHabitatResponse = {
 type ApiErrorResponse = {
   error: {
     message: string;
+  };
+};
+
+type WorldSectorResponse = {
+  sector: {
+    bounds: WorldSectorBounds;
   };
 };
 
@@ -204,6 +241,19 @@ export function createHabitatApiApp(options: HabitatApiOptions = {}): Hono {
     return response;
   }
 
+  async function getCurrentSectorBounds(habitatId: string): Promise<WorldSectorBounds> {
+    const path = `/world/sectors/current?${new URLSearchParams({ habitatId }).toString()}`;
+    const response = await keplerRequest(path, { method: "GET" });
+
+    if (!response.ok) {
+      const message = (await response.text()).trim() || "Unable to load the current Kepler sector.";
+      throw new Error(`Kepler request failed: ${response.status} ${message}`);
+    }
+
+    const payload = (await response.json()) as WorldSectorResponse;
+    return payload.sector.bounds;
+  }
+
   app.get("/registration", (context) => {
     const state = store.readState();
     const registration = state.kepler;
@@ -262,14 +312,24 @@ export function createHabitatApiApp(options: HabitatApiOptions = {}): Hono {
       displayName: body.displayName,
       habitatUuid,
       habitatId: registration.habitatId,
+      contracts: registration.contracts,
       starterModules: registration.starterModules,
+      starterHumans: registration.starterHumans,
       blueprints: registration.blueprints as HabitatRegistrationRecord["blueprints"],
     };
     state.inventory = getEffectiveInventory(state);
     state.modules = registration.starterModules.map(cloneModule);
+    state.humans = registration.starterHumans.map((human) => ({
+      id: human.id,
+      displayName: human.displayName,
+      locationModuleId: human.locationModuleId,
+    }));
     store.writeState(state);
 
-    logLine(options.logger, `[habitat-api] POST /registration -> ${registration.starterModules.length} starter modules`);
+    logLine(
+      options.logger,
+      `[habitat-api] POST /registration -> ${registration.starterModules.length} starter modules, ${registration.starterHumans.length} starter humans`,
+    );
     return context.json<RegistrationCreateResponse>(
       {
         registration: {
@@ -454,16 +514,6 @@ export function createHabitatApiApp(options: HabitatApiOptions = {}): Hono {
       return context.json<ApiErrorResponse>(createErrorResponse("This CLI has not been registered with Kepler yet."), 404);
     }
 
-    const x = parseIntegerQueryValue(context.req.query("x"));
-    if (x === null) {
-      return context.json<ApiErrorResponse>(createErrorResponse("x must be an integer."), 400);
-    }
-
-    const y = parseIntegerQueryValue(context.req.query("y"));
-    if (y === null) {
-      return context.json<ApiErrorResponse>(createErrorResponse("y must be an integer."), 400);
-    }
-
     const strength = parseIntegerQueryValue(context.req.query("strength"));
     if (strength === null || strength < 0 || strength > 100) {
       return context.json<ApiErrorResponse>(createErrorResponse("strength must be an integer from 0 through 100."), 400);
@@ -474,10 +524,15 @@ export function createHabitatApiApp(options: HabitatApiOptions = {}): Hono {
       return context.json<ApiErrorResponse>(createErrorResponse("radius must be an integer from 0 through 5."), 400);
     }
 
+    const eva = getEvaState(state);
+    if (!eva.deployedHumanId || !eva.position) {
+      return context.json<ApiErrorResponse>(createErrorResponse("No human is currently deployed for EVA."), 409);
+    }
+
     const searchParams = new URLSearchParams({
       habitatId: state.kepler.habitatId,
-      x: String(x),
-      y: String(y),
+      x: String(eva.position.x),
+      y: String(eva.position.y),
       sensorStrength: String(strength),
       radiusTiles: String(radius),
     });
@@ -631,6 +686,14 @@ export function createHabitatApiApp(options: HabitatApiOptions = {}): Hono {
       return context.json<ApiErrorResponse>(createErrorResponse(`Module "${moduleId}" was not found.`), 404);
     }
 
+    const occupyingHuman = (state.humans ?? []).find((human) => human.locationModuleId === module.id);
+    if (occupyingHuman) {
+      return context.json<ApiErrorResponse>(
+        createErrorResponse(`Module "${moduleId}" cannot be deleted while occupied by human "${occupyingHuman.id}".`),
+        409,
+      );
+    }
+
     state.modules = (state.modules ?? []).filter((entry) => entry.id !== module.id);
 
     for (const entry of state.modules) {
@@ -642,6 +705,318 @@ export function createHabitatApiApp(options: HabitatApiOptions = {}): Hono {
     logLine(options.logger, `[habitat-api] DELETE /modules/${moduleId} -> deleted`);
     return context.json<ModuleResponse>({
       module,
+    });
+  });
+
+  app.get("/humans", (context) => {
+    const state = store.readState();
+    const humans = state.humans ?? [];
+
+    logLine(options.logger, `[habitat-api] GET /humans -> ${humans.length} humans`);
+    return context.json<HumanListResponse>({
+      humans,
+    });
+  });
+
+  app.get("/eva", (context) => {
+    const state = store.readState();
+    const eva = getEvaState(state);
+
+    logLine(options.logger, `[habitat-api] GET /eva -> ${eva.deployedHumanId ?? "none"}`);
+    return context.json<EvaResponse>({
+      eva,
+    });
+  });
+
+  app.post("/eva/deploy", async (context) => {
+    const state = store.readState();
+    const body = (await context.req.json()) as {
+      humanId?: unknown;
+    };
+
+    if (typeof body.humanId !== "string" || body.humanId.trim().length === 0) {
+      return context.json<ApiErrorResponse>(createErrorResponse("humanId is required."), 400);
+    }
+
+    if (!state.kepler) {
+      return context.json<ApiErrorResponse>(createErrorResponse("This CLI has not been registered with Kepler yet."), 404);
+    }
+
+    try {
+      await getCurrentSectorBounds(state.kepler.habitatId);
+      const eva = deployHumanForEva(state, body.humanId);
+      openOrUpdateAlert(
+        state,
+        {
+          code: "eva-human-deployed",
+          title: "Human Deployed",
+          description: "A human is outside the habitat.",
+          severity: "warning",
+          status: "open",
+          source: "eva",
+          subject: {
+            type: "human",
+            id: body.humanId,
+          },
+        },
+        new Date().toISOString(),
+      );
+      store.writeState(state);
+
+      logLine(options.logger, `[habitat-api] POST /eva/deploy -> ${body.humanId}`);
+      return context.json<EvaResponse>({ eva });
+    } catch (error) {
+      return context.json<ApiErrorResponse>(createErrorResponse((error as Error).message), 409);
+    }
+  });
+
+  app.post("/eva/move", async (context) => {
+    const state = store.readState();
+
+    if (!state.kepler) {
+      return context.json<ApiErrorResponse>(createErrorResponse("This CLI has not been registered with Kepler yet."), 404);
+    }
+
+    const body = (await context.req.json()) as {
+      x?: unknown;
+      y?: unknown;
+    };
+
+    if (typeof body.x !== "number" || !Number.isInteger(body.x) || typeof body.y !== "number" || !Number.isInteger(body.y)) {
+      return context.json<ApiErrorResponse>(createErrorResponse("x and y must be whole numbers."), 400);
+    }
+
+    try {
+      const bounds = await getCurrentSectorBounds(state.kepler.habitatId);
+      const eva = moveEva(state, body.x, body.y, bounds);
+      store.writeState(state);
+
+      logLine(options.logger, `[habitat-api] POST /eva/move -> (${body.x}, ${body.y})`);
+      return context.json<EvaResponse>({ eva });
+    } catch (error) {
+      return context.json<ApiErrorResponse>(createErrorResponse((error as Error).message), 409);
+    }
+  });
+
+  app.post("/eva/dock", (context) => {
+    const state = store.readState();
+    const eva = getEvaState(state);
+
+    try {
+      ensureDockable(eva);
+      const now = new Date().toISOString();
+      const returnedHumanId = eva.deployedHumanId;
+      const suitportModuleId = eva.suitportModuleId;
+
+      state.inventory = state.inventory ?? {};
+      for (const resource of eva.carriedResources) {
+        state.inventory[resource.resourceType] = (state.inventory[resource.resourceType] ?? 0) + resource.quantityKg;
+      }
+
+      if (returnedHumanId && suitportModuleId) {
+        const human = findHumanById(state.humans, returnedHumanId);
+        if (human) {
+          human.locationModuleId = suitportModuleId;
+        }
+      }
+
+      resolveAlertByCode(
+        state,
+        "eva-human-deployed",
+        now,
+        returnedHumanId
+          ? {
+              type: "human",
+              id: returnedHumanId,
+            }
+          : undefined,
+      );
+      if (returnedHumanId) {
+        resolveAlertByCode(state, "eva-carry-capacity-reached", now, {
+          type: "human",
+          id: returnedHumanId,
+        });
+      }
+
+      state.eva = {
+        deployedHumanId: null,
+        suitportModuleId: null,
+        position: null,
+        carriedResources: [],
+        carryCapacityKg: eva.carryCapacityKg,
+      };
+      store.writeState(state);
+
+      logLine(options.logger, `[habitat-api] POST /eva/dock -> ${returnedHumanId}`);
+      return context.json<EvaResponse>({ eva: state.eva });
+    } catch (error) {
+      return context.json<ApiErrorResponse>(createErrorResponse((error as Error).message), 409);
+    }
+  });
+
+  app.post("/collect", async (context) => {
+    const state = store.readState();
+
+    if (!state.kepler) {
+      return context.json<ApiErrorResponse>(createErrorResponse("This CLI has not been registered with Kepler yet."), 404);
+    }
+
+    const eva = getEvaState(state);
+    if (!eva.deployedHumanId || !eva.position) {
+      return context.json<ApiErrorResponse>(createErrorResponse("No human is currently deployed for EVA."), 409);
+    }
+
+    const body = (await context.req.json()) as {
+      quantityKg?: unknown;
+    };
+
+    let quantityKg: number;
+    try {
+      quantityKg = validateCollectionQuantity(body.quantityKg);
+      ensureCarryCapacity(eva, quantityKg);
+    } catch (error) {
+      return context.json<ApiErrorResponse>(createErrorResponse((error as Error).message), 409);
+    }
+
+    const response = await keplerRequest("/world/collect", {
+      method: "POST",
+      body: JSON.stringify({
+        habitatId: state.kepler.habitatId,
+        x: eva.position.x,
+        y: eva.position.y,
+        quantityKg,
+      }),
+    });
+
+    if (!response.ok) {
+      const responseText = (await response.text()).trim();
+      let message = responseText || "Unable to collect Kepler material.";
+      if (responseText.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(responseText) as ApiErrorResponse;
+          message = parsed.error.message;
+        } catch {
+          message = responseText;
+        }
+      }
+      openOrUpdateAlert(
+        state,
+        {
+          code: "eva-collection-failed",
+          title: "Collection Failed",
+          description: message,
+          severity: "warning",
+          status: "open",
+          source: "collection",
+          subject: eva.deployedHumanId
+            ? {
+                type: "human",
+                id: eva.deployedHumanId,
+              }
+            : undefined,
+        },
+        new Date().toISOString(),
+      );
+      store.writeState(state);
+      const status = response.status >= 500 ? 502 : response.status === 404 ? 404 : response.status === 400 ? 400 : 409;
+      return context.json<ApiErrorResponse>(createErrorResponse(`Kepler request failed: ${response.status} ${message}`), status);
+    }
+
+    const payload = (await response.json()) as CollectionResponse;
+    addCarriedResource(eva, payload.collection);
+    state.eva = eva;
+    if (eva.deployedHumanId && eva.carriedResources.reduce((total, resource) => total + resource.quantityKg, 0) >= eva.carryCapacityKg) {
+      openOrUpdateAlert(
+        state,
+        {
+          code: "eva-carry-capacity-reached",
+          title: "EVA Carry Capacity Reached",
+          description: "The deployed explorer has reached EVA carrying capacity.",
+          severity: "warning",
+          status: "open",
+          source: "collection",
+          subject: {
+            type: "human",
+            id: eva.deployedHumanId,
+          },
+        },
+        new Date().toISOString(),
+      );
+    }
+    store.writeState(state);
+
+    logLine(options.logger, `[habitat-api] POST /collect -> ${payload.collection.resourceType} ${payload.collection.collectedKg} kg`);
+    return context.json<CollectionResponse>({
+      collection: payload.collection,
+      eva,
+    });
+  });
+
+  app.get("/alerts", (context) => {
+    const state = store.readState();
+    const alerts = listAlerts(state);
+
+    logLine(options.logger, `[habitat-api] GET /alerts -> ${alerts.length} alerts`);
+    return context.json<AlertListResponse>({
+      alerts,
+    });
+  });
+
+  app.post("/alerts/:alertId/acknowledge", (context) => {
+    const state = store.readState();
+    const alertId = context.req.param("alertId");
+
+    try {
+      const alert = acknowledgeAlert(state, alertId, new Date().toISOString());
+      store.writeState(state);
+
+      logLine(options.logger, `[habitat-api] POST /alerts/${alertId}/acknowledge -> ${alert.status}`);
+      return context.json<AlertResponse>({
+        alert,
+      });
+    } catch (error) {
+      return context.json<ApiErrorResponse>(createErrorResponse((error as Error).message), 404);
+    }
+  });
+
+  app.post("/humans/:humanId/move", async (context) => {
+    const state = store.readState();
+    const humanId = context.req.param("humanId");
+    const human = findHumanById(state.humans, humanId);
+
+    if (!human) {
+      return context.json<ApiErrorResponse>(createErrorResponse(`Human "${humanId}" was not found.`), 404);
+    }
+
+    const body = (await context.req.json()) as {
+      destinationModuleId?: unknown;
+    };
+
+    if (typeof body.destinationModuleId !== "string" || body.destinationModuleId.trim().length === 0) {
+      return context.json<ApiErrorResponse>(createErrorResponse("destinationModuleId is required."), 400);
+    }
+
+    const destinationModule = findModuleById(state.modules, body.destinationModuleId);
+    if (!destinationModule) {
+      return context.json<ApiErrorResponse>(
+        createErrorResponse(`Module "${body.destinationModuleId}" was not found.`),
+        404,
+      );
+    }
+
+    if (!canMoveHumanToModule(state.humans, destinationModule, human.id)) {
+      return context.json<ApiErrorResponse>(
+        createErrorResponse(`Module "${destinationModule.id}" is already at full crew capacity.`),
+        409,
+      );
+    }
+
+    human.locationModuleId = destinationModule.id;
+    store.writeState(state);
+
+    logLine(options.logger, `[habitat-api] POST /humans/${humanId}/move -> ${destinationModule.id}`);
+    return context.json<HumanResponse>({
+      human,
     });
   });
 

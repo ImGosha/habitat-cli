@@ -12,6 +12,7 @@ import {
   previewConstruction,
   startConstruction,
 } from "./construction.js";
+import { formatAlertList } from "./alerts.js";
 import {
   formatBoolean,
   formatExamples,
@@ -22,7 +23,9 @@ import {
   formatTable,
   formatUnknownValue,
 } from "./cli-format.js";
+import { formatEvaStatus } from "./eva.js";
 import { HabitatApiClient } from "./habitat-api-client.js";
+import { formatHumanList } from "./humans.js";
 import { formatInventoryList } from "./inventory.js";
 import { type HabitatRegistrationRecord, type LocalState } from "./local-state.js";
 import { formatResourceList } from "./resources.js";
@@ -59,8 +62,6 @@ type ConstructOptions = {
 };
 
 type ScanCommandOptions = {
-  x: string;
-  y: string;
   strength: string;
   radius?: string;
   json?: boolean;
@@ -363,8 +364,6 @@ async function showSolarStatus(): Promise<void> {
 
 async function scanResources(options: ScanCommandOptions): Promise<void> {
   const parsedOptions: ScanOptions = {
-    x: Number(options.x),
-    y: Number(options.y),
     strength: Number(options.strength),
     radius: options.radius === undefined ? 0 : Number(options.radius),
     json: options.json,
@@ -378,8 +377,6 @@ async function scanResources(options: ScanCommandOptions): Promise<void> {
 
   try {
     const response = await habitatApiClient.scan({
-      x: parsedOptions.x,
-      y: parsedOptions.y,
       strength: parsedOptions.strength,
       radius: parsedOptions.radius,
     });
@@ -390,6 +387,107 @@ async function scanResources(options: ScanCommandOptions): Promise<void> {
     }
 
     console.log(formatScanReport(response));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function showEvaStatus(): Promise<void> {
+  try {
+    const response = await habitatApiClient.getEvaStatus();
+    console.log(formatEvaStatus(response.eva));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function deployEva(humanId: string): Promise<void> {
+  try {
+    const response = await habitatApiClient.deployEva(humanId);
+    console.log(formatEvaStatus(response.eva));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function moveEva(x: string, y: string): Promise<void> {
+  const parsedX = Number(x);
+  const parsedY = Number(y);
+
+  if (!Number.isInteger(parsedX) || !Number.isInteger(parsedY)) {
+    console.error("x and y must be whole numbers.");
+    process.exit(1);
+  }
+
+  try {
+    const response = await habitatApiClient.moveEva(parsedX, parsedY);
+    console.log(formatEvaStatus(response.eva));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function dockEva(): Promise<void> {
+  try {
+    const response = await habitatApiClient.dockEva();
+    console.log(formatEvaStatus(response.eva));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function collectMaterial(quantityKg: string): Promise<void> {
+  const parsedQuantity = Number(quantityKg);
+
+  if (!Number.isInteger(parsedQuantity) || parsedQuantity <= 0) {
+    console.error("quantityKg must be a positive whole number.");
+    process.exit(1);
+  }
+
+  try {
+    const response = await habitatApiClient.collectResource(parsedQuantity);
+    console.log(
+      [
+        formatResultSummary("Collection Complete", [
+          ["Resource", response.collection.resourceType],
+          ["Collected", `${response.collection.collectedKg} kg`],
+          ["Remaining On Tile", `${response.collection.remainingKg} kg`],
+          ["Position", `(${response.collection.x}, ${response.collection.y})`],
+        ]),
+        formatEvaStatus(response.eva),
+      ].join("\n\n"),
+    );
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function listAlerts(): Promise<void> {
+  try {
+    const response = await habitatApiClient.listAlerts();
+    console.log(formatAlertList(response.alerts));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function acknowledgeAlert(alertId: string): Promise<void> {
+  try {
+    const response = await habitatApiClient.acknowledgeAlert(alertId);
+    console.log(
+      formatResultSummary("Alert Acknowledged", [
+        ["Alert ID", response.alert.id],
+        ["Code", response.alert.code],
+        ["Status", response.alert.status],
+      ]),
+    );
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -554,6 +652,33 @@ async function listModules(): Promise<void> {
   try {
     const response = await habitatApiClient.listModules();
     console.log(formatModuleList(response.modules));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function listHumans(): Promise<void> {
+  try {
+    const response = await habitatApiClient.listHumans();
+    console.log(formatHumanList(response.humans));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+async function moveHuman(humanId: string, destinationModuleId: string): Promise<void> {
+  try {
+    const response = await habitatApiClient.moveHuman(humanId, destinationModuleId);
+    const human = response.human;
+    console.log(
+      formatResultSummary("Human Moved", [
+        ["Human ID", human.id],
+        ["Display Name", human.displayName],
+        ["Location Module", human.locationModuleId],
+      ]),
+    );
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -855,9 +980,7 @@ const solarCommand = program
 
 const scanCommand = program
   .command("scan")
-  .description("Scan nearby Kepler tiles for resource probabilities.")
-  .requiredOption("--x <integer>", "Current x coordinate")
-  .requiredOption("--y <integer>", "Current y coordinate")
+  .description("Scan nearby Kepler tiles from the deployed explorer position.")
   .requiredOption("--strength <0-100>", "Effective sensor strength")
   .option("--radius <0-5>", "Scan radius in tiles", "0")
   .option("--json", "Print the raw JSON scan response")
@@ -870,6 +993,18 @@ const constructionCommand = program
 const inventoryCommand = program
   .command("inventory")
   .description("Manage local habitat inventory.");
+
+const humanCommand = program
+  .command("human")
+  .description("Manage local habitat humans.");
+
+const evaCommand = program
+  .command("eva")
+  .description("Manage local EVA exploration state.");
+
+const alertCommand = program
+  .command("alert")
+  .description("Inspect and acknowledge local habitat alerts.");
 
 blueprintCommand.addHelpText(
   "after",
@@ -914,9 +1049,9 @@ solarCommand
 scanCommand.addHelpText(
   "after",
   exampleBlock([
-    "habitat scan --x 3 --y -2 --strength 60",
-    "habitat scan --x 3 --y -2 --strength 60 --radius 1",
-    "habitat scan --x 3 --y -2 --strength 60 --radius 1 --json",
+    "habitat scan --strength 60",
+    "habitat scan --strength 60 --radius 1",
+    "habitat scan --strength 60 --radius 1 --json",
   ]),
 );
 
@@ -931,6 +1066,32 @@ inventoryCommand.addHelpText(
   exampleBlock([
     "habitat inventory list",
     "habitat inventory add silicate-glass 45",
+  ]),
+);
+
+humanCommand.addHelpText(
+  "after",
+  exampleBlock([
+    "habitat human list",
+    "habitat human move human_1 basic_suitport_1",
+  ]),
+);
+
+evaCommand.addHelpText(
+  "after",
+  exampleBlock([
+    "habitat eva status",
+    "habitat eva deploy human_1",
+    "habitat eva move 1 0",
+    "habitat eva dock",
+  ]),
+);
+
+alertCommand.addHelpText(
+  "after",
+  exampleBlock([
+    "habitat alert list",
+    "habitat alert acknowledge alert_1",
   ]),
 );
 
@@ -955,6 +1116,67 @@ inventoryCommand
   .argument("<amount>", "Amount to remove")
   .action(removeInventory)
   .addHelpText("after", exampleBlock(["habitat inventory remove silicate-glass 45"]));
+
+humanCommand
+  .command("list")
+  .description("List local habitat humans and their current modules.")
+  .action(listHumans)
+  .addHelpText("after", exampleBlock(["habitat human list"]));
+
+humanCommand
+  .command("move")
+  .description("Move one human into another local habitat module.")
+  .argument("<humanId>", "Human ID")
+  .argument("<moduleId>", "Destination module ID or short ID")
+  .action(moveHuman)
+  .addHelpText("after", exampleBlock(["habitat human move human_1 basic_suitport_1"]));
+
+evaCommand
+  .command("status")
+  .description("Show deployed explorer status, position, and carried resources.")
+  .action(showEvaStatus)
+  .addHelpText("after", exampleBlock(["habitat eva status"]));
+
+evaCommand
+  .command("deploy")
+  .description("Deploy one human for EVA from the suitport.")
+  .argument("<humanId>", "Human ID")
+  .action(deployEva)
+  .addHelpText("after", exampleBlock(["habitat eva deploy human_1"]));
+
+evaCommand
+  .command("move")
+  .description("Move the deployed explorer one adjacent tile.")
+  .argument("<x>", "Destination x coordinate")
+  .argument("<y>", "Destination y coordinate")
+  .action(moveEva)
+  .addHelpText("after", exampleBlock(["habitat eva move 1 0"]));
+
+evaCommand
+  .command("dock")
+  .description("Dock the deployed explorer at habitat origin.")
+  .action(dockEva)
+  .addHelpText("after", exampleBlock(["habitat eva dock"]));
+
+program
+  .command("collect")
+  .description("Collect material at the deployed explorer's current tile.")
+  .argument("<quantityKg>", "Quantity to collect in kilograms")
+  .action(collectMaterial)
+  .addHelpText("after", exampleBlock(["habitat collect 1"]));
+
+alertCommand
+  .command("list")
+  .description("List persisted habitat alerts.")
+  .action(listAlerts)
+  .addHelpText("after", exampleBlock(["habitat alert list"]));
+
+alertCommand
+  .command("acknowledge")
+  .description("Acknowledge one persisted habitat alert.")
+  .argument("<alertId>", "Alert ID")
+  .action(acknowledgeAlert)
+  .addHelpText("after", exampleBlock(["habitat alert acknowledge alert_1"]));
 
 constructionCommand.addHelpText(
   "after",
